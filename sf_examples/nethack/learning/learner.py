@@ -10,16 +10,11 @@ from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, buil
 from sample_factory.algo.utils.action_distributions import get_action_distribution
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.model_sharing import ParameterServer
-from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
-from sample_factory.algo.utils.shared_buffers import init_tensor
 from sample_factory.algo.utils.tensor_dict import TensorDict
-from sample_factory.algo.utils.tensor_utils import ensure_torch_tensor
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
-from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import log
-from sf_examples.nethack.datasets.dataset import TtyrecDatasetWorker
 
 
 class NetHackLearner(Learner):
@@ -39,29 +34,11 @@ class NetHackLearner(Learner):
             param_server,
         )
 
-        self.dataset = None
-        self.dataset_rnn_states = None
-
         self.supervised_loss_func: Optional[Callable] = None
         self.kickstarting_loss_func: Optional[Callable] = None
 
     def init(self) -> InitModelData:
         init_model_data = super().init()
-
-        supervised_learning = self.cfg.supervised_loss_coeff != 0
-        # TODO: distillation
-        self.use_dataset = supervised_learning
-
-        if self.use_dataset:
-            self.dataset = TtyrecDatasetWorker(self.cfg)
-
-            rnn_size = get_rnn_size(self.cfg)
-            sampling_device = "cpu"  # TODO: check if we can use gpu here
-            dataset_num_traj = self.cfg.dataset_batch_size // self.cfg.dataset_rollout
-            self.dataset_rnn_states = []
-            for _ in range(self.cfg.dataset_num_splits):
-                hs = init_tensor([dataset_num_traj], torch.float32, [rnn_size], sampling_device, False)
-                self.dataset_rnn_states.append(hs)
 
         if self.cfg.supervised_loss_coeff == 0.0:
             self.supervised_loss_func = lambda dataset_mb: 0.0
@@ -74,47 +51,6 @@ class NetHackLearner(Learner):
             self.kickstarting_loss_func = self._kickstarting_loss
 
         return init_model_data
-
-    def _sample_dataset(self):
-        # TODO: split this code into pieces, for loop should be inside model, only keep the loss related stuff
-        dataset_mb = self.dataset.result()
-        idx = self.dataset.idx
-
-        obs = {
-            key: value
-            for key, value in dataset_mb.items()
-            if key in ["tty_chars", "tty_colors", "tty_cursor", "screen_image"]
-        }
-        normalized_obs = prepare_and_normalize_obs(self.actor_critic, obs)
-        dataset_mb["normalized_obs"] = normalized_obs
-
-        rnn_states = self.dataset_rnn_states[idx]
-        # TODO: do we want to keep hidden states between rollouts?
-        rnn_states = torch.zeros_like(rnn_states)
-        rnn_states = ensure_torch_tensor(rnn_states).to(self.device).float()
-
-        dones = dataset_mb["dones"]
-        for i in range(len(dones)):
-            step_dones = dones[i]
-            # Reset rnn_state to zero whenever an episode ended
-            # Make sure it is broadcastable with rnn_states
-            rnn_states = rnn_states * (~step_dones).float().view(-1, 1)
-            step_normalized_obs = {key: value[i] for key, value in dataset_mb["normalized_obs"].items()}
-
-            policy_outputs = self.actor_critic(step_normalized_obs, rnn_states)
-            rnn_states = policy_outputs["new_rnn_states"]
-
-            for key, value in policy_outputs.items():
-                if key not in dataset_mb:
-                    dataset_mb[key] = []
-                dataset_mb[key].append(value)
-
-        for key in policy_outputs.keys():
-            dataset_mb[key] = torch.concatenate(dataset_mb[key])
-
-        # store rnn_states, for next rollout
-        self.dataset_rnn_states[idx] = rnn_states.detach()
-        return dataset_mb
 
     def _kickstarting_loss(self, result, valids, num_invalids: int):
         kickstarting_loss = F.kl_div(
@@ -359,16 +295,6 @@ class NetHackLearner(Learner):
                         regularizer_loss,
                         regularizer_loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
-
-                # with timing.add_time("sample_dataset"):
-                #     if self.use_dataset:
-                #         dataset_mb = self._sample_dataset()
-                #     else:
-                #         dataset_mb = None
-
-                if self.use_dataset:
-                    # Only call step when you are done with dataset data - it may get overwritten
-                    self.dataset.step()
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
