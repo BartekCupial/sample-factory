@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from copy import copy
 from typing import Dict, List, Tuple
 
 import torch
@@ -9,8 +10,8 @@ from signal_slot.queue_utils import get_queue
 from torch import Tensor
 
 from sample_factory.algo.sampling.sampling_utils import rollout_worker_device
-from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.actor_critic_info import ActorCriticInfo
+from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.misc import MAGIC_FLOAT, MAGIC_INT
 from sample_factory.algo.utils.rl_utils import trajectories_per_training_iteration
 from sample_factory.algo.utils.tensor_dict import TensorDict
@@ -57,7 +58,9 @@ def init_tensor(leading_dimensions: List, tensor_type, tensor_shape, device: tor
     return t
 
 
-def alloc_trajectory_tensors(env_info: EnvInfo, actor_critic_info: ActorCriticInfo, num_traj, rollout, rnn_size, device, share) -> TensorDict:
+def alloc_trajectory_tensors(
+    env_info: EnvInfo, actor_critic_info: ActorCriticInfo, num_traj, rollout, rnn_size, device, share
+) -> TensorDict:
     obs_space = env_info.obs_space
 
     tensors = TensorDict()
@@ -107,7 +110,7 @@ def alloc_policy_output_tensors(cfg, env_info: EnvInfo, actor_critic_info: Actor
     else:
         policy_outputs_shape += [envs_per_split, num_agents]
 
-    policy_outputs = actor_critic_info.policy_output_shapes
+    policy_outputs = copy(actor_critic_info.policy_output_shapes)
     policy_outputs += [("new_rnn_states", [rnn_size])]  # different name so we don't override current step rnn_state
 
     output_names, output_shapes = list(zip(*policy_outputs))

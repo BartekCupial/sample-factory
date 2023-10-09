@@ -41,7 +41,7 @@ class NetHackLearner(Learner):
         init_model_data = super().init()
 
         if self.cfg.supervised_loss_coeff == 0.0:
-            self.supervised_loss_func = lambda dataset_mb: 0.0
+            self.supervised_loss_func = lambda returns, mb, valids, num_invalids: 0.0
         else:
             self.supervised_loss_func = self._supervised_loss
 
@@ -66,18 +66,18 @@ class NetHackLearner(Learner):
 
         return kickstarting_loss
 
-    def _supervised_loss(self, dataset_mb):
-        outputs = dataset_mb["action_logits"]
-        targets = dataset_mb["actions_converted"].reshape(-1)
+    def _supervised_loss(self, result, mb, valids, num_invalids):
+        outputs = result["action_logits"]
+        targets = mb["normalized_obs"]["action_converted"].reshape(-1).long()
         supervised_loss = F.cross_entropy(outputs, targets)
-
+        supervised_loss = masked_select(supervised_loss, valids, num_invalids)
         supervised_loss = supervised_loss.mean()
         supervised_loss *= self.cfg.supervised_loss_coeff
 
         return supervised_loss
 
     def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int
+        self, dict_mb: Dict[str, AttrDict], dict_num_invalids: Dict[str, int]
     ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
@@ -88,46 +88,69 @@ class NetHackLearner(Learner):
             clip_ratio_low = 1.0 / clip_ratio_high
             clip_value = self.cfg.ppo_clip_value
 
-            valids = mb.valids
+            dict_valids = {key: mb.valids for key, mb in dict_mb.items()}
 
         # calculate policy head outside of recurrent loop
         with self.timing.add_time("forward_head"):
-            head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
-            minibatch_size: int = head_outputs.size(0)
+            head_outputs = {}
+            for key, mb in dict_mb.items():
+                head_outputs[key] = self.actor_critic.forward_head(mb.normalized_obs)
+                minibatch_size: int = head_outputs[key].size(0)
 
         # initial rnn states
         with self.timing.add_time("bptt_initial"):
             if self.cfg.use_rnn:
                 # this is the only way to stop RNNs from backpropagating through invalid timesteps
                 # (i.e. experience collected by another policy)
-                done_or_invalid = torch.logical_or(mb.dones_cpu, ~valids.cpu()).float()
-                head_output_seq, rnn_states, inverted_select_inds = build_rnn_inputs(
-                    head_outputs,
-                    done_or_invalid,
-                    mb.rnn_states,
-                    recurrence,
-                )
+                head_output_seq, rnn_states, inverted_select_inds = {}, {}, {}
+                for key, mb in dict_mb.items():
+                    done_or_invalid = torch.logical_or(mb.dones_cpu, ~dict_valids[key].cpu()).float()
+                    head_output_seq[key], rnn_states[key], inverted_select_inds[key] = build_rnn_inputs(
+                        head_outputs[key],
+                        done_or_invalid,
+                        mb.rnn_states,
+                        recurrence,
+                    )
             else:
-                rnn_states = mb.rnn_states[::recurrence]
+                rnn_states = {}
+                for key, mb in dict_mb.items():
+                    rnn_states[key] = mb.rnn_states[::recurrence]
 
         # calculate RNN outputs for each timestep in a loop
         with self.timing.add_time("bptt"):
             if self.cfg.use_rnn:
                 with self.timing.add_time("bptt_forward_core"):
-                    core_output_seq, _ = self.actor_critic.forward_core(head_output_seq, rnn_states)
-                core_outputs = build_core_out_from_seq(core_output_seq, inverted_select_inds)
-                del core_output_seq
+                    core_outputs = {}
+                    for key in dict_mb.keys():
+                        core_output_seq, _ = self.actor_critic.forward_core(head_output_seq[key], rnn_states[key])
+                        core_outputs[key] = build_core_out_from_seq(core_output_seq, inverted_select_inds[key])
+                        del core_output_seq
+                del head_output_seq
             else:
-                core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
-
-            del head_outputs
+                core_outputs = {}
+                for key in dict_mb.keys():
+                    core_outputs[key], _ = self.actor_critic.forward_core(head_outputs[key], rnn_states[key])
+                del head_outputs
 
         num_trajectories = minibatch_size // recurrence
-        assert core_outputs.shape[0] == minibatch_size
+        assert list(core_outputs.values())[0].shape[0] == minibatch_size
 
         with self.timing.add_time("tail"):
-            # calculate policy tail outside of recurrent loop
-            result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
+            dict_result = {}
+            for key, mb in dict_mb.items():
+                # calculate policy tail outside of recurrent loop
+                dict_result[key] = self.actor_critic.forward_tail(
+                    core_outputs[key], values_only=False, sample_actions=False
+                )
+
+            del core_outputs
+
+        if any([env_info.name == self.cfg.rl_env for env_info in self.env_info]):
+            result = dict_result[self.cfg.rl_env]
+            mb = dict_mb[self.cfg.rl_env]
+            valids = dict_valids[self.cfg.rl_env]
+            num_invalids = dict_num_invalids[self.cfg.rl_env]
+
             action_distribution = self.actor_critic.action_distribution()
             log_prob_actions = action_distribution.log_prob(mb.actions)
             ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
@@ -137,76 +160,94 @@ class NetHackLearner(Learner):
 
             values = result["values"].squeeze()
 
-            del core_outputs
+            # these computations are not the part of the computation graph
+            with torch.no_grad(), self.timing.add_time("advantages_returns"):
+                if self.cfg.with_vtrace:
+                    # V-trace parameters
+                    rho_hat = torch.Tensor([self.cfg.vtrace_rho])
+                    c_hat = torch.Tensor([self.cfg.vtrace_c])
 
-        # these computations are not the part of the computation graph
-        with torch.no_grad(), self.timing.add_time("advantages_returns"):
-            if self.cfg.with_vtrace:
-                # V-trace parameters
-                rho_hat = torch.Tensor([self.cfg.vtrace_rho])
-                c_hat = torch.Tensor([self.cfg.vtrace_c])
+                    ratios_cpu = ratio.cpu()
+                    values_cpu = values.cpu()
+                    rewards_cpu = mb.rewards_cpu
+                    dones_cpu = mb.dones_cpu
 
-                ratios_cpu = ratio.cpu()
-                values_cpu = values.cpu()
-                rewards_cpu = mb.rewards_cpu
-                dones_cpu = mb.dones_cpu
+                    vtrace_rho = torch.min(rho_hat, ratios_cpu)
+                    vtrace_c = torch.min(c_hat, ratios_cpu)
 
-                vtrace_rho = torch.min(rho_hat, ratios_cpu)
-                vtrace_c = torch.min(c_hat, ratios_cpu)
+                    vs = torch.zeros((num_trajectories * recurrence))
+                    adv = torch.zeros((num_trajectories * recurrence))
 
-                vs = torch.zeros((num_trajectories * recurrence))
-                adv = torch.zeros((num_trajectories * recurrence))
+                    next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
+                    next_values /= self.cfg.gamma
+                    next_vs = next_values
 
-                next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
-                next_values /= self.cfg.gamma
-                next_vs = next_values
+                    for i in reversed(range(self.cfg.recurrence)):
+                        rewards = rewards_cpu[i::recurrence]
+                        dones = dones_cpu[i::recurrence]
+                        not_done = 1.0 - dones
+                        not_done_gamma = not_done * self.cfg.gamma
 
-                for i in reversed(range(self.cfg.recurrence)):
-                    rewards = rewards_cpu[i::recurrence]
-                    dones = dones_cpu[i::recurrence]
-                    not_done = 1.0 - dones
-                    not_done_gamma = not_done * self.cfg.gamma
+                        curr_values = values_cpu[i::recurrence]
+                        curr_vtrace_rho = vtrace_rho[i::recurrence]
+                        curr_vtrace_c = vtrace_c[i::recurrence]
 
-                    curr_values = values_cpu[i::recurrence]
-                    curr_vtrace_rho = vtrace_rho[i::recurrence]
-                    curr_vtrace_c = vtrace_c[i::recurrence]
+                        delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
+                        adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
+                        next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
+                        vs[i::recurrence] = next_vs
 
-                    delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
-                    adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
-                    next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
-                    vs[i::recurrence] = next_vs
+                        next_values = curr_values
 
-                    next_values = curr_values
+                    targets = vs.to(self.device)
+                    adv = adv.to(self.device)
+                else:
+                    # using regular GAE
+                    adv = mb.advantages
+                    targets = mb.returns
 
-                targets = vs.to(self.device)
-                adv = adv.to(self.device)
-            else:
-                # using regular GAE
-                adv = mb.advantages
-                targets = mb.returns
+                adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
+                adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
 
-            adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
-            adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
+            with self.timing.add_time("losses"):
+                # noinspection PyTypeChecker
+                policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+                exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
+                kl_old, kl_loss = self.kl_loss_func(
+                    self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
+                )
+                old_values = mb["values"]
+                value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
 
-        with self.timing.add_time("losses"):
-            # noinspection PyTypeChecker
-            policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
-            exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
-            kl_old, kl_loss = self.kl_loss_func(
-                self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
-            )
-            old_values = mb["values"]
-            value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+            with self.timing.add_time("regularizer_losses"):
+                kickstarting_loss = self.kickstarting_loss_func(result, valids, num_invalids)
+        else:
+            ratio = torch.tensor([0.0])
+            policy_loss = 0.0
+            exploration_loss = 0.0
+            kl_old, kl_loss = torch.tensor([0.0]), 0.0
+            value_loss = 0.0
+            kickstarting_loss = 0.0
+            adv, adv_mean, adv_std = 0.0, 0.0, 0.0
+            values = torch.tensor([0.0]).to(self.device)
+            action_distribution = self.actor_critic.action_distribution()
 
-        with self.timing.add_time("regularizer_losses"):
-            kickstarting_loss = self.kickstarting_loss_func(result, valids, num_invalids)
-            supervised_loss = self.supervised_loss_func(mb)
+        if any([env_info.name == self.cfg.ds_env for env_info in self.env_info]):
+            with self.timing.add_time("regularizer_losses"):
+                result = dict_result[self.cfg.ds_env]
+                mb = dict_mb[self.cfg.ds_env]
+                valids = dict_valids[self.cfg.ds_env]
+                num_invalids = dict_num_invalids[self.cfg.ds_env]
+
+                supervised_loss = self.supervised_loss_func(result, mb, valids, num_invalids)
+        else:
+            supervised_loss = 0.0
 
         loss_summaries = dict(
             ratio=ratio,
             clip_ratio_low=clip_ratio_low,
             clip_ratio_high=clip_ratio_high,
-            values=result["values"],
+            values=values,
             adv=adv,
             adv_std=adv_std,
             adv_mean=adv_mean,
@@ -230,7 +271,11 @@ class NetHackLearner(Learner):
         )
 
     def _train(
-        self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
+        self,
+        dict_gpu_buffer: Dict[str, TensorDict],
+        batch_size: int,
+        dict_experience_size: Dict[str, int],
+        dict_num_invalids: Dict[str, int],
     ) -> Optional[AttrDict]:
         timing = self.timing
         with torch.no_grad():
@@ -271,17 +316,24 @@ class NetHackLearner(Learner):
                     break
 
                 force_summaries = False
-                minibatches = self._get_minibatches(batch_size, experience_size)
+
+                minibatches = {
+                    key: self._get_minibatches(batch_size, experience_size)
+                    for key, experience_size in dict_experience_size.items()
+                }
 
             for batch_num in range(len(minibatches)):
                 with torch.no_grad(), timing.add_time("minibatch_init"):
-                    indices = minibatches[batch_num]
+                    dict_mb = {}
+                    for key in dict_gpu_buffer.keys():
+                        indices = minibatches[key][batch_num]
 
-                    # current minibatch consisting of short trajectory segments with length == recurrence
-                    mb = self._get_minibatch(gpu_buffer, indices)
+                        # current minibatch consisting of short trajectory segments with length == recurrence
+                        mb = self._get_minibatch(dict_gpu_buffer[key], indices)
 
-                    # enable syntactic sugar that allows us to access dict's keys as object attributes
-                    mb = AttrDict(mb)
+                        # enable syntactic sugar that allows us to access dict's keys as object attributes
+                        mb = AttrDict(mb)
+                        dict_mb[key] = mb
 
                 with timing.add_time("calculate_losses"):
                     (
@@ -294,7 +346,7 @@ class NetHackLearner(Learner):
                         loss_summaries,
                         regularizer_loss,
                         regularizer_loss_summaries,
-                    ) = self._calculate_losses(mb, num_invalids)
+                    ) = self._calculate_losses(dict_mb, dict_num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
@@ -321,13 +373,16 @@ class NetHackLearner(Learner):
                 with torch.no_grad(), timing.add_time("kl_divergence"):
                     # if kl_old is not None it is already calculated above
                     if kl_old is None:
+                        action_logits = torch.cat([mb["action_logits"] for mb in dict_mb.values()], dim=0)
+                        valids = torch.cat([mb["valids"] for mb in dict_mb.values()], dim=0)
+                        num_invalids = sum(list(dict_num_invalids.values()))
                         # calculate KL-divergence with the behaviour policy action distribution
                         old_action_distribution = get_action_distribution(
                             self.actor_critic.action_space,
-                            mb.action_logits,
+                            action_logits,
                         )
                         kl_old = action_distribution.kl_divergence(old_action_distribution)
-                        kl_old = masked_select(kl_old, mb.valids, num_invalids)
+                        kl_old = masked_select(kl_old, valids, num_invalids)
 
                     kl_old_mean = float(kl_old.mean().item())
                     recent_kls.append(kl_old_mean)
@@ -349,6 +404,8 @@ class NetHackLearner(Learner):
                     curr_policy_version = self.train_step  # policy version before the weight update
 
                     actual_lr = self.curr_lr
+                    experience_size = sum(list(dict_experience_size.values()))
+                    num_invalids = sum(list(dict_num_invalids.values()))
                     if num_invalids > 0:
                         # if we have masked (invalid) data we should reduce the learning rate accordingly
                         # this prevents a situation where most of the data in the minibatch is invalid

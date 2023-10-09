@@ -104,7 +104,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
         render_mode = None
 
     env = make_env_func_batched(
-        cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode
+        cfg.env, cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode
     )
     env_info = extract_env_info(env, cfg)
 

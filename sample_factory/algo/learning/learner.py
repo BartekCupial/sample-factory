@@ -187,7 +187,7 @@ class Learner(Configurable):
             raise NotImplementedError(f"{self.cfg.exploration_loss} not supported!")
 
         if self.cfg.kl_loss_coeff == 0.0:
-            if is_continuous_action_space(self.env_info.action_space):
+            if is_continuous_action_space(self.env_info[0].action_space):
                 log.warning(
                     "WARNING! It is generally recommended to enable Fixed KL loss (https://arxiv.org/pdf/1707.06347.pdf) for continuous action tasks to avoid potential numerical issues. "
                     "I.e. set --kl_loss_coeff=0.1"
@@ -210,7 +210,7 @@ class Learner(Configurable):
         log.debug("Initializing actor-critic model on device %s", self.device)
 
         # trainable torch module
-        self.actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
+        self.actor_critic = create_actor_critic(self.cfg, self.env_info[0].obs_space, self.env_info[0].action_space)
         log.debug("Created Actor Critic model with architecture:")
         log.debug(self.actor_critic)
         self.actor_critic.model_to_device(self.device)
@@ -667,8 +667,13 @@ class Learner(Configurable):
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
 
     def _train(
-        self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
+        self,
+        gpu_buffer: TensorDict,
+        batch_size: int,
+        experience_size: int,
+        num_invalids: int,
     ) -> Optional[AttrDict]:
+        assert False, "need support for dict of buffers"
         timing = self.timing
         with torch.no_grad():
             early_stopping_tolerance = 1e-6
@@ -1029,7 +1034,7 @@ class Learner(Configurable):
 
             return buff, dataset_size, num_invalids
 
-    def train(self, batch: TensorDict) -> Optional[Dict]:
+    def train(self, batches: Dict[str, TensorDict]) -> Optional[Dict]:
         if self.cfg.save_milestones_ith > 0 and self.env_steps // self.cfg.save_milestones_ith > self.checkpoint_steps:
             self.save_milestone()
             self.checkpoint_steps = self.env_steps // self.cfg.save_milestones_ith
@@ -1039,9 +1044,13 @@ class Learner(Configurable):
             self._maybe_load_policy()
 
         with self.timing.add_time("prepare_batch"):
-            buff, experience_size, num_invalids = self._prepare_batch(batch)
+            buff = {}
+            experience_size = {}
+            num_invalids = {}
+            for key, batch in batches.items():
+                buff[key], experience_size[key], num_invalids[key] = self._prepare_batch(batch)
 
-        if num_invalids >= experience_size:
+        if all([n >= e for n, e in zip(num_invalids.values(), experience_size.values())]):
             if self.cfg.with_pbt:
                 log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
             else:
@@ -1049,14 +1058,19 @@ class Learner(Configurable):
             return None
         else:
             with self.timing.add_time("train"):
-                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+                train_stats = self._train(
+                    buff,
+                    self.cfg.batch_size,
+                    experience_size,
+                    num_invalids,
+                )
 
             # multiply the number of samples by frameskip so that FPS metrics reflect the number
             # of environment steps actually simulated
             if self.cfg.summaries_use_frameskip:
-                self.env_steps += experience_size * self.env_info.frameskip
+                self.env_steps += list(experience_size.values())[0] * self.env_info[0].frameskip
             else:
-                self.env_steps += experience_size
+                self.env_steps += list(experience_size.values())[0]
 
             stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
             if train_stats is not None:

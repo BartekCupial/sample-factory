@@ -21,6 +21,7 @@ ENV_INFO_PROTOCOL_VERSION = 1
 
 @dataclass
 class EnvInfo:
+    name: str
     obs_space: gym.Space
     action_space: gym.Space
     num_agents: int
@@ -38,7 +39,7 @@ class EnvInfo:
     env_info_protocol_version: Optional[int] = None
 
 
-def extract_env_info(env: BatchedVecEnv | NonBatchedVecEnv, cfg: Config) -> EnvInfo:
+def extract_env_info(env: BatchedVecEnv | NonBatchedVecEnv, cfg: Config, name: str) -> EnvInfo:
     obs_space = env.observation_space
     action_space = env.action_space
     num_agents = env.num_agents
@@ -57,6 +58,7 @@ def extract_env_info(env: BatchedVecEnv | NonBatchedVecEnv, cfg: Config) -> EnvI
         all_discrete = all(isinstance(space, gym.spaces.Discrete) for space in action_space)
 
     env_info = EnvInfo(
+        name=name,
         obs_space=obs_space,
         action_space=action_space,
         num_agents=num_agents,
@@ -72,7 +74,7 @@ def extract_env_info(env: BatchedVecEnv | NonBatchedVecEnv, cfg: Config) -> EnvI
 
 
 def check_env_info(env: BatchedVecEnv | NonBatchedVecEnv, env_info: EnvInfo, cfg: Config) -> None:
-    new_env_info = extract_env_info(env, cfg)
+    new_env_info = extract_env_info(env, cfg, env_info.name)
     if new_env_info != env_info:
         cache_filename = env_info_cache_filename(cfg)
         log.error(
@@ -95,10 +97,12 @@ def check_env_info(env: BatchedVecEnv | NonBatchedVecEnv, env_info: EnvInfo, cfg
 def spawn_tmp_env_and_get_info(sf_context, res_queue, cfg):
     set_global_context(sf_context)
 
-    tmp_env = make_env_func_batched(cfg, env_config=None)
-    env_info = extract_env_info(tmp_env, cfg)
-    tmp_env.close()
-    del tmp_env
+    env_info = []
+    for env_name in cfg.env:
+        tmp_env = make_env_func_batched(env_name, cfg, env_config=None)
+        env_info.append(extract_env_info(tmp_env, cfg, env_name))
+        tmp_env.close()
+        del tmp_env
 
     log.debug("Env info: %r", env_info)
     res_queue.put(env_info)

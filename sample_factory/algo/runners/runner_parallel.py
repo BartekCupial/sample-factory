@@ -25,9 +25,12 @@ class ParallelRunner(Runner):
         mp_ctx = get_mp_ctx(self.cfg.serial_mode)
 
         for policy_id in range(self.cfg.num_policies):
-            batcher_event_loop = EventLoop("batcher_evt_loop")
-            self.batchers[policy_id] = self._make_batcher(batcher_event_loop, policy_id)
-            batcher_event_loop.owner = self.batchers[policy_id]
+            self.batchers[policy_id] = []
+            for env_info, buffer_mgr in zip(self.env_info, self.buffers_mgr):
+                batcher_event_loop = EventLoop(f"batcher_evt_loop_{env_info.name}")
+                batcher = self._make_batcher(batcher_event_loop, policy_id, buffer_mgr, env_info)
+                self.batchers[policy_id].append(batcher)
+                batcher_event_loop.owner = batcher
 
             learner_proc = EventLoopProcess(f"learner_proc{policy_id}", mp_ctx, init_func=init_learner_process)
             self.processes.append(learner_proc)
@@ -40,7 +43,10 @@ class ParallelRunner(Runner):
             learner_proc.event_loop.owner = self.learners[policy_id]
             learner_proc.set_init_func_args((sf_global_context(), self.learners[policy_id]))
 
-        self.sampler = self._make_sampler(ParallelSampler, self.event_loop)
+        self.samplers = []
+        for env_info, buffer_mgr in zip(self.env_info, self.buffers_mgr):
+            sampler = self._make_sampler(ParallelSampler, self.event_loop, buffer_mgr, env_info)
+            self.samplers.append(sampler)
 
         self.connect_components()
         return status
@@ -61,5 +67,6 @@ class ParallelRunner(Runner):
             log.debug(f"Waiting for process {p.name} to stop...")
             p.join()
 
-        self.sampler.join()
+        for sampler in self.samplers:
+            sampler.join()
         super()._on_everything_stopped()

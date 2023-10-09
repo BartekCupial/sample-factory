@@ -87,7 +87,7 @@ class Sampler(AbstractSampler, ABC):
         cfg: Config,
         env_info: EnvInfo,
     ):
-        unique_name = Sampler.__name__
+        unique_name = f"{Sampler.__name__}_{env_info.name}"
         AbstractSampler.__init__(self, event_loop, buffer_mgr, param_servers, cfg, env_info, unique_name)
 
         self.inference_queues: Dict[PolicyID, MpQueue] = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from threading import Thread
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import psutil
 import torch
@@ -19,6 +19,7 @@ from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.shared_buffers import BufferMgr
 from sample_factory.algo.utils.torch_utils import init_torch_runtime
 from sample_factory.cfg.configurable import Configurable
+from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.gpu_utils import cuda_envvars_for_policy
 from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.utils.utils import init_file_logger, log
@@ -54,8 +55,8 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         evt_loop: EventLoop,
         cfg: Config,
         env_info: EnvInfo,
-        buffer_mgr: BufferMgr,
-        batcher: Batcher,
+        buffers_mgr: List[BufferMgr],
+        batchers: List[Batcher],
         policy_id: PolicyID,
     ):
         Configurable.__init__(self, cfg)
@@ -63,10 +64,13 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         unique_name = f"{LearnerWorker.__name__}_p{policy_id}"
         HeartbeatStoppableEventLoopObject.__init__(self, evt_loop, unique_name, cfg.heartbeat_interval)
 
-        self.batcher: Batcher = batcher
-        self.batcher_thread: Optional[Thread] = None
+        self.batchers: Batcher = batchers
+        self.batcher_threads: Optional[List[Thread]] = None
 
-        policy_versions_tensor: Tensor = buffer_mgr.policy_versions
+        self.env_info = env_info
+        self.last_batches: Dict[str, AttrDict] = {e_info.name: None for e_info in self.env_info}
+
+        policy_versions_tensor: Tensor = buffers_mgr[0].policy_versions
         self.param_server = ParameterServer(policy_id, policy_versions_tensor, cfg.serial_mode)
         self.learner: Learner = larner_cls(cfg, env_info, policy_versions_tensor, policy_id, self.param_server)
 
@@ -126,12 +130,16 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.learner.set_new_cfg(new_cfg)
 
     def start_batcher_thread(self):
-        self.batcher.event_loop.process = self.event_loop.process
-        self.batcher_thread = Thread(target=self.batcher.event_loop.exec)
-        self.batcher_thread.start()
+        self.batcher_threads = []
+        for batcher in self.batchers:
+            batcher.event_loop.process = self.event_loop.process
+            batcher_thread = Thread(target=batcher.event_loop.exec)
+            batcher_thread.start()
+            self.batcher_threads.append(batcher_thread)
 
     def join_batcher_thread(self):
-        self.batcher_thread.join()
+        for batcher_thread in self.batcher_threads:
+            batcher_thread.join()
 
     def init(self):
         if not self.cfg.serial_mode:
@@ -147,14 +155,22 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.initialized.emit()
         log.debug(f"{self.object_id} finished initialization!")
 
-    def on_new_training_batch(self, batch_idx: int):
-        stats = self.learner.train(self.batcher.training_batches[batch_idx])
+    def on_new_training_batch(self, batch_idx: int, env_name: str):
+        for batcher in self.batchers:
+            if batcher.env_info.name == env_name:
+                self.last_batches[env_name] = batcher.training_batches[batch_idx]
 
-        self.training_iteration_since_resume += 1
-        self.training_batch_released.emit(batch_idx, self.training_iteration_since_resume)
-        self.finished_training_iteration.emit(self.training_iteration_since_resume)
-        if stats is not None:
-            self.report_msg.emit(stats)
+        if all(value is not None for value in self.last_batches.values()):
+            stats = self.learner.train(self.last_batches)
+
+            self.training_iteration_since_resume += 1
+            self.training_batch_released.emit(batch_idx, self.training_iteration_since_resume)
+            self.finished_training_iteration.emit(self.training_iteration_since_resume)
+            if stats is not None:
+                self.report_msg.emit(stats)
+
+            # reset last_batches
+            self.last_batches = {key: None for key in self.last_batches.keys()}
 
     # noinspection PyMethodMayBeStatic
     def _cleanup_cache(self):

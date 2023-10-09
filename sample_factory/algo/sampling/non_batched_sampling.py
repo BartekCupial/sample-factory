@@ -386,7 +386,7 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
             )
 
             # log.info('Creating env %r... %d-%d-%d', env_config, self.worker_idx, self.split_idx, env_i)
-            env = make_env_func_non_batched(self.cfg, env_config=env_config)
+            env = make_env_func_non_batched(self.env_info.name, self.cfg, env_config=env_config)
             check_env_info(env, self.env_info, self.cfg)
 
             self.envs.append(env)

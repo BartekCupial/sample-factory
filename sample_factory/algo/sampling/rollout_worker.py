@@ -81,7 +81,7 @@ class RolloutWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self, event_loop, worker_idx: int, buffer_mgr, inference_queues: Dict[PolicyID, MpQueue], cfg, env_info: EnvInfo
     ):
         Configurable.__init__(self, cfg)
-        unique_name = f"{RolloutWorker.__name__}_w{worker_idx}"
+        unique_name = f"{RolloutWorker.__name__}_w{worker_idx}_{env_info.name}"
         HeartbeatStoppableEventLoopObject.__init__(self, event_loop, unique_name, cfg.heartbeat_interval)
 
         self.timing = Timing(name=f"{self.object_id} profile")

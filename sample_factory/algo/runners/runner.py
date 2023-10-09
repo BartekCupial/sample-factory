@@ -15,8 +15,8 @@ from tensorboardX import SummaryWriter
 from sample_factory.algo.learning.batcher import Batcher
 from sample_factory.algo.learning.learner_worker import LearnerWorker
 from sample_factory.algo.sampling.sampler import AbstractSampler
-from sample_factory.algo.utils.env_info import EnvInfo, obtain_env_info_in_a_separate_process
 from sample_factory.algo.utils.actor_critic_info import ActorCriticInfo, obtain_ac_info_in_a_separate_process
+from sample_factory.algo.utils.env_info import EnvInfo, obtain_env_info_in_a_separate_process
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import (
     EPISODIC,
@@ -94,11 +94,11 @@ class Runner(EventLoopObject, Configurable):
 
         self.reward_shaping: List[Optional[Dict]] = [None for _ in range(self.cfg.num_policies)]
 
-        self.buffer_mgr = None
+        self.buffers_mgr: List[BufferMgr] = None
 
         self.learners: Dict[PolicyID, LearnerWorker] = dict()
-        self.batchers: Dict[PolicyID, Batcher] = dict()
-        self.sampler: Optional[AbstractSampler] = None
+        self.batchers: Dict[PolicyID, List[Batcher]] = dict()
+        self.samplers: Optional[List[AbstractSampler]] = None
 
         self.timing = Timing("Runner profile")
 
@@ -521,37 +521,44 @@ class Runner(EventLoopObject, Configurable):
             log.debug(f"Saving configuration to {fname}...")
             json.dump(cfg_dict(self.cfg), json_file, indent=2)
 
-    def _make_batcher(self, event_loop, policy_id: PolicyID):
-        return Batcher(event_loop, policy_id, self.buffer_mgr, self.cfg, self.env_info, self.actor_critic_info)
+    def _make_batcher(self, event_loop, policy_id: PolicyID, buffer_mgr: BufferMgr, env_info: EnvInfo):
+        return Batcher(event_loop, policy_id, buffer_mgr, self.cfg, env_info, self.actor_critic_info)
 
-    def _make_learner(self, event_loop, policy_id: PolicyID, batcher: Batcher):
+    def _make_learner(self, event_loop, policy_id: PolicyID, batchers: List[Batcher]):
         from sample_factory.algo.utils.context import global_learner_cls
+
         learner_cls = global_learner_cls()
         return LearnerWorker(
             learner_cls,
             event_loop,
             self.cfg,
             self.env_info,
-            self.buffer_mgr,
-            batcher,
+            self.buffers_mgr,
+            batchers,
             policy_id=policy_id,
         )
 
-    def _make_sampler(self, sampler_cls: type, event_loop: EventLoop):
+    def _make_sampler(
+        self,
+        sampler_cls: type,
+        event_loop: EventLoop,
+        buffer_mgr: BufferMgr,
+        env_info: EnvInfo,
+    ):
         assert len(self.learners) == self.cfg.num_policies, "Learners not created yet"
         param_servers = {policy: self.learners[policy].param_server for policy in self.learners}
-        return sampler_cls(event_loop, self.buffer_mgr, param_servers, self.cfg, self.env_info)
+        return sampler_cls(event_loop, buffer_mgr, param_servers, self.cfg, env_info)
 
     def init(self) -> StatusCode:
         set_global_cuda_envvars(self.cfg)
         self.env_info = obtain_env_info_in_a_separate_process(self.cfg)
-        self.actor_critic_info = obtain_ac_info_in_a_separate_process(self.cfg, self.env_info)
+        self.actor_critic_info = obtain_ac_info_in_a_separate_process(self.cfg, self.env_info[0])
 
         for policy_id in range(self.cfg.num_policies):
-            self.reward_shaping[policy_id] = self.env_info.reward_shaping_scheme
+            self.reward_shaping[policy_id] = self.env_info[0].reward_shaping_scheme
 
         # check for any incompatible arguments
-        if not preprocess_cfg(self.cfg, self.env_info):
+        if not preprocess_cfg(self.cfg, self.env_info[0]):
             return ExperimentStatus.FAILURE
 
         log.debug(f"Starting experiment with the following configuration:\n{cfg_str(self.cfg)}")
@@ -560,7 +567,9 @@ class Runner(EventLoopObject, Configurable):
         self._save_cfg()
         save_git_diff(experiment_dir(self.cfg))
 
-        self.buffer_mgr = BufferMgr(self.cfg, self.env_info, self.actor_critic_info)
+        self.buffers_mgr = []
+        for env_info in self.env_info:
+            self.buffers_mgr.append(BufferMgr(self.cfg, env_info, self.actor_critic_info))
 
         self._observers_call(AlgoObserver.on_init, self)
 
@@ -568,7 +577,8 @@ class Runner(EventLoopObject, Configurable):
 
     def _on_start(self):
         """Override this in a subclass to do something right when the experiment is started."""
-        self.sampler.init()
+        for sampler in self.samplers:
+            sampler.init()
         self._propagate_training_info()
         self._observers_call(AlgoObserver.on_start, self)
 
@@ -651,50 +661,59 @@ class Runner(EventLoopObject, Configurable):
     def connect_components(self):
         self.event_loop.start.connect(self._on_start)
 
-        sampler = self.sampler
+        samplers = self.samplers
         for policy_id in range(self.cfg.num_policies):
             # when runner is ready we initialize the learner first and then all other components in a chain
             learner_worker = self.learners[policy_id]
-            batcher = self.batchers[policy_id]
+            batchers = self.batchers[policy_id]
             self.event_loop.start.connect(learner_worker.init)
-            learner_worker.initialized.connect(batcher.init)
-            sampler.connect_model_initialized(policy_id, learner_worker.model_initialized)
+            for batcher in batchers:
+                learner_worker.initialized.connect(batcher.init)
+            for sampler in samplers:
+                sampler.connect_model_initialized(policy_id, learner_worker.model_initialized)
 
             # key connections - sampler and batcher exchanging connections back and forth
-            sampler.connect_on_new_trajectories(policy_id, batcher.on_new_trajectories)
-            sampler.connect_trajectory_buffers_available(batcher.trajectory_buffers_available)
+            for sampler, batcher in zip(samplers, batchers):
+                sampler.connect_on_new_trajectories(policy_id, batcher.on_new_trajectories)
+                sampler.connect_trajectory_buffers_available(batcher.trajectory_buffers_available)
 
-            # batcher gives learner batches of trajectories ready for learning
-            batcher.training_batches_available.connect(learner_worker.on_new_training_batch)
-            # once learner is done with a training batch, it is given back to the batcher
-            learner_worker.training_batch_released.connect(batcher.on_training_batch_released)
+            for batcher in batchers:
+                # batcher gives learner batches of trajectories ready for learning
+                batcher.training_batches_available.connect(learner_worker.on_new_training_batch)
+                # once learner is done with a training batch, it is given back to the batcher
+                learner_worker.training_batch_released.connect(batcher.on_training_batch_released)
 
-            # signals that allow us to throttle the sampler if the learner can't keep up
-            sampler.connect_stop_experience_collection(batcher.stop_experience_collection)
-            sampler.connect_resume_experience_collection(batcher.resume_experience_collection)
+            for sampler, batcher in zip(samplers, batchers):
+                # signals that allow us to throttle the sampler if the learner can't keep up
+                sampler.connect_stop_experience_collection(batcher.stop_experience_collection)
+                sampler.connect_resume_experience_collection(batcher.resume_experience_collection)
 
             # auxiliary connections, such as summary reporting and checkpointing
             learner_worker.finished_training_iteration.connect(self._after_training_iteration)
             learner_worker.report_msg.connect(self._process_msg)
-            sampler.connect_report_msg(self._process_msg)
-            sampler.connect_update_training_info(self.update_training_info)
+            for sampler in samplers:
+                sampler.connect_report_msg(self._process_msg)
+                sampler.connect_update_training_info(self.update_training_info)
             self.save_periodic.connect(learner_worker.save)
             self.save_best.connect(learner_worker.save_best)
             self.save_milestone.connect(learner_worker.save_milestone)
 
             # stop components when needed
-            self._setup_component_termination(self.stop, batcher)
-            self._setup_component_termination(batcher.stop, learner_worker)
+            for batcher in batchers:
+                self._setup_component_termination(self.stop, batcher)
+                self._setup_component_termination(batcher.stop, learner_worker)
 
             # Heartbeats
-            self._setup_component_heartbeat(batcher)
+            for batcher in batchers:
+                self._setup_component_heartbeat(batcher)
             self._setup_component_heartbeat(learner_worker)
 
-        for sampler_component in sampler.stoppable_components():
-            self._setup_component_termination(self.stop, sampler_component)
+        for sampler in samplers:
+            for sampler_component in sampler.stoppable_components():
+                self._setup_component_termination(self.stop, sampler_component)
 
-        for sampler_component in sampler.heartbeat_components():
-            self._setup_component_heartbeat(sampler_component)
+            for sampler_component in sampler.heartbeat_components():
+                self._setup_component_heartbeat(sampler_component)
 
         # final cleanup
         self.all_components_stopped.connect(self._on_everything_stopped)

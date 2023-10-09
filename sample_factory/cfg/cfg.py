@@ -2,14 +2,15 @@ import multiprocessing
 import os
 from argparse import ArgumentParser
 from os.path import join
+from typing import List
 
-from sample_factory.utils.utils import str2bool
+from sample_factory.utils.utils import str2bool, str2env
 
 
 def add_basic_cli_args(p: ArgumentParser):
     p.add_argument("-h", "--help", action="store_true", help="Print the help message", required=False)
     p.add_argument("--algo", type=str, default="APPO", help="Algorithm to use")
-    p.add_argument("--env", type=str, default=None, required=True, help="Name of the environment to use")
+    p.add_argument("--env", type=str2env, default=None, required=True, help="Name of the environment to use")
     p.add_argument(
         "--experiment",
         type=str,

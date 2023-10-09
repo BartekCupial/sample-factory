@@ -18,10 +18,16 @@ class SerialRunner(Runner):
             return status
 
         for policy_id in range(self.cfg.num_policies):
-            self.batchers[policy_id] = self._make_batcher(self.event_loop, policy_id)
+            self.batchers[policy_id] = []
+            for env_info, buffer_mgr in zip(self.env_info, self.buffers_mgr):
+                batcher = self._make_batcher(self.event_loop, policy_id, buffer_mgr, env_info)
+                self.batchers[policy_id].append(batcher)
             self.learners[policy_id] = self._make_learner(self.event_loop, policy_id, self.batchers[policy_id])
 
-        self.sampler = self._make_sampler(SerialSampler, self.event_loop)
+        self.samplers = []
+        for env_info, buffer_mgr in zip(self.env_info, self.buffers_mgr):
+            sampler = self._make_sampler(SerialSampler, self.event_loop, buffer_mgr, env_info)
+            self.samplers.append(sampler)
 
         self.connect_components()
         return status

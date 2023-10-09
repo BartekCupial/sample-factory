@@ -76,7 +76,7 @@ class InferenceWorker(HeartbeatStoppableEventLoopObject, Configurable):
         env_info: EnvInfo,
     ):
         Configurable.__init__(self, cfg)
-        unique_name = f"{InferenceWorker.__name__}_p{policy_id}-w{worker_idx}"
+        unique_name = f"{InferenceWorker.__name__}_p{policy_id}-w{worker_idx}_{env_info.name}"
         HeartbeatStoppableEventLoopObject.__init__(self, event_loop, unique_name, cfg.heartbeat_interval)
 
         self.timing = Timing(name=f"{self.object_id} profile")

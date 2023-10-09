@@ -70,6 +70,8 @@ def add_extra_params_general(parser):
     p.add_argument("--distilling_loss_coeff", type=float, default=0.0)
     p.add_argument("--teacher_path", type=str, default=None)
     p.add_argument("--run_teacher_hs", type=bool, default=False)
+    p.add_argument("--rl_env", type=str, default="challenge")
+    p.add_argument("--ds_env", type=str, default="dataset")
 
 
 def nethack_override_defaults(_env, parser):

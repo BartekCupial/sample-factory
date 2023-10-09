@@ -199,6 +199,13 @@ def str2bool(v):
         raise argparse.ArgumentTypeError("Boolean value expected")
 
 
+def str2env(value):
+    if "," in value:
+        return value.split(",")
+    else:
+        return [value]
+
+
 # numpy stuff
 
 

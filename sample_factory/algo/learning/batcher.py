@@ -4,8 +4,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 from signal_slot.signal_slot import EventLoop, signal
 
-from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.actor_critic_info import ActorCriticInfo
+from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.shared_buffers import BufferMgr, alloc_trajectory_tensors, policy_device
 from sample_factory.algo.utils.tensor_dict import TensorDict
@@ -97,7 +97,7 @@ class Batcher(HeartbeatStoppableEventLoopObject):
         env_info: EnvInfo,
         actor_critic_info: ActorCriticInfo,
     ):
-        unique_name = f"{Batcher.__name__}_{policy_id}"
+        unique_name = f"{Batcher.__name__}_{env_info.name}_{policy_id}"
         super().__init__(evt_loop, unique_name, cfg.heartbeat_interval)
 
         self.timing = Timing(name=f"Batcher {policy_id} profile")
@@ -224,7 +224,7 @@ class Batcher(HeartbeatStoppableEventLoopObject):
                 assert trajectories_copied == self.traj_per_training_iteration and remaining == 0
 
                 # signal the learner that we have a new training batch
-                self.training_batches_available.emit(batch_idx)
+                self.training_batches_available.emit(batch_idx, self.env_info.name)
 
                 if self.cfg.async_rl:
                     self._release_traj_tensors(batch_idx)
