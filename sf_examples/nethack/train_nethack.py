@@ -63,7 +63,7 @@ def load_pretrained_checkpoint(model, checkpoint_dir: str, checkpoint_kind: str,
         del checkpoint_dict["model"]["returns_normalizer.running_var"]
         del checkpoint_dict["model"]["returns_normalizer.count"]
 
-    model.load_state_dict(checkpoint_dict["model"])
+    model.load_state_dict(checkpoint_dict["model"], strict=False)
 
 
 def load_pretrained_checkpoint_from_shared_weights(

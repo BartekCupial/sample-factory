@@ -468,6 +468,26 @@ class Learner(Configurable):
 
         return value_loss
 
+    def _value_loss_dist(
+        self,
+        new_values: Tensor,
+        old_values: Tensor,
+        target: Tensor,
+        value_distribution,
+        clip_value: float,
+        valids: Tensor,
+        num_invalids: int,
+    ):
+        log_prob_values = value_distribution.log_prob(target)
+        value_loss = -log_prob_values
+
+        value_loss = masked_select(value_loss, valids, num_invalids)
+        value_loss = value_loss.mean()
+
+        value_loss *= self.cfg.value_loss_coeff
+
+        return value_loss
+
     def _kl_loss(
         self, action_space, action_logits, action_distribution, valids, num_invalids: int
     ) -> Tuple[Tensor, Tensor]:
@@ -598,6 +618,8 @@ class Learner(Configurable):
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
             action_distribution = self.actor_critic.action_distribution()
             log_prob_actions = action_distribution.log_prob(mb.actions)
+            if not self.cfg.critic_deterministic:
+                value_distribution = self.actor_critic.value_distribution()
             ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
 
             # super large/small values can cause numerical problems and are probably noise anyway
@@ -664,7 +686,12 @@ class Learner(Configurable):
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
             old_values = mb["values"]
-            value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+            if self.cfg.critic_deterministic:
+                value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+            else:
+                value_loss = self._value_loss_dist(
+                    values, old_values, targets, value_distribution, clip_value, valids, num_invalids
+                )
 
         loss_summaries = dict(
             ratio=ratio,

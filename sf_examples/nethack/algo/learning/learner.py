@@ -379,6 +379,8 @@ class DatasetLearner(Learner):
             mb_results = self._compute_model_outputs(mb, num_invalids)
             # we want action distribution (last) of the same shape as mb
             action_distribution = self.actor_critic.action_distribution()
+            if not self.cfg.critic_deterministic:
+                value_distribution = self.actor_critic.value_distribution()
 
             with self.timing.add_time("ppo_losses"):
                 ratio = mb_results["ratio"]
@@ -396,7 +398,12 @@ class DatasetLearner(Learner):
                     self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
                 )
                 old_values = mb["values"]
-                value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+                if self.cfg.critic_deterministic:
+                    value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+                else:
+                    value_loss = self._value_loss_dist(
+                        values, old_values, targets, value_distribution, clip_value, valids, num_invalids
+                    )
 
             with self.timing.add_time("kickstarting_loss"):
                 kickstarting_loss = self.kickstarting_loss_func(

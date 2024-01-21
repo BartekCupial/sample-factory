@@ -599,6 +599,20 @@ def add_model_args(p: ArgumentParser):
         nargs="*",
         help="Optional decoder MLP layers after the policy core. If empty (default) decoder is identity function.",
     )
+    # Critic settings. Decoder appears between policy core (RNN) and action/critic heads.
+    p.add_argument(
+        "--critic_deterministic",
+        default=True,
+        type=str2bool,
+        help="Whether to return value directly or to sample from Gaussian.",
+    )
+    p.add_argument(
+        "--critic_mlp_layers",
+        default=[],
+        type=int,
+        nargs="*",
+        help="Optional critic MLP layers after the policy core. If empty (default) critic is a linear function.",
+    )
 
     p.add_argument(
         "--nonlinearity", default="elu", choices=["elu", "relu", "tanh"], type=str, help="Type of nonlinearity to use."
