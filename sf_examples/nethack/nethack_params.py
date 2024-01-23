@@ -76,6 +76,11 @@ def add_extra_params_learner(parser):
     p.add_argument("--dataset_deep", type=str2bool, default=False)
     p.add_argument("--dataset_shuffle", type=str2bool, default=True, help="for debugging purposes")
     p.add_argument("--reset_on_rollout_boundary", type=str2bool, default=False)
+    p.add_argument("--ppg_sleep", type=str2bool, default=False)
+    p.add_argument("--ppg_kl_loss_coeff", type=float, default=1.0)
+    p.add_argument("--ppg_sleep_sample_reuse", type=int, default=6)
+    p.add_argument("--ppg_sleep_cycles", type=int, default=2)
+    p.add_argument("--ppg_value_loss_coeff", type=float, default=1.0)
 
 
 def add_extra_params_general(parser):

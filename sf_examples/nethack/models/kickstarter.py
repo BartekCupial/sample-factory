@@ -112,11 +112,17 @@ class KickStarter(nn.Module):
 
             return outputs, new_rnn_states
 
-    def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
+    def forward_tail(
+        self, core_output, values_only: bool, sample_actions: bool, detach_critic: bool = False
+    ) -> TensorDict:
         core_outputs_split = core_output.chunk(self.num_models, dim=1)
 
-        student_outputs = self.student.forward_tail(core_outputs_split[0], values_only, sample_actions)
-        teacher_outputs = self.teacher.forward_tail(core_outputs_split[1], values_only, sample_actions)
+        student_outputs = self.student.forward_tail(
+            core_outputs_split[0], values_only, sample_actions, detach_critic=detach_critic
+        )
+        teacher_outputs = self.teacher.forward_tail(
+            core_outputs_split[1], values_only, sample_actions, detach_critic=detach_critic
+        )
 
         student_outputs[self._k + "action_logits"] = teacher_outputs["action_logits"]
 
