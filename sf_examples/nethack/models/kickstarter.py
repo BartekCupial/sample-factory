@@ -57,6 +57,9 @@ class KickStarter(nn.Module):
     def action_distribution(self):
         return self.student.action_distribution()
 
+    def value_distribution(self):
+        return self.student.value_distribution()
+
     def _maybe_sample_actions(self, sample_actions: bool, result: TensorDict) -> None:
         return self.student._maybe_sample_actions(sample_actions, result)
 
