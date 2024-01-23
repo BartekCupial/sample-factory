@@ -46,8 +46,7 @@ params_grid = [
     {
         "seed": list(range(1)),
         "freeze": [{"encoder": 0}],
-        "clip_advantages": [True, False],
-        "value_loss_coeff": [0.0001, 0.001, 0.01, 0.1],
+        "value_loss_coeff": [0.0001, 0.001, 0.01, 0.1, 1.0],
     },
 ]
 
