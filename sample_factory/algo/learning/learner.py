@@ -961,13 +961,6 @@ class Learner(Configurable):
             stats.debug_value_loss = value_loss.mean()
             stats.debug_value_loss_max = value_loss.max()
 
-            def convert_to_score(t):
-                return (t * stats.returns_running_std + stats.returns_running_mean) * 100
-
-            stats.debug_value_loss_argmax_target_score = convert_to_score(target[worst_idx])
-            stats.debug_value_loss_argmax_old_diff_score = convert_to_score(target[worst_idx] - old_values[worst_idx])
-            stats.debug_value_loss_argmax_new_diff_score = convert_to_score(target[worst_idx] - new_values[worst_idx])
-
             stats.kl_divergence = var.kl_old_mean
             stats.kl_divergence_max = var.kl_old.max()
             stats.value_delta = value_delta_avg
