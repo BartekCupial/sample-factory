@@ -1,3 +1,4 @@
+import ast
 import multiprocessing
 import os
 from argparse import ArgumentParser
@@ -413,8 +414,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument(
         "--actor_worker_gpus",
         default=[],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="By default, actor workers only use CPUs. Changes this if e.g. you need GPU-based rendering on the actors",
     )
     p.add_argument(
@@ -550,11 +550,9 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--encoder_mlp_layers",
         default=[512, 512],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="In case of MLP encoder, sizes of layers to use. This is ignored if observations are images. "
-        "To use this parameter from command line, omit the = sign and separate values with spaces, e.g. "
-        "--encoder_mlp_layers 256 128 64",
+        "e.g. --encoder_mlp_layers=[256, 128, 64]",
     )
 
     # policy with image observations - convolutional encoder options
@@ -569,8 +567,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--encoder_conv_mlp_layers",
         default=[512],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="Optional fully connected layers after the convolutional encoder head.",
     )
 
@@ -595,8 +592,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--decoder_mlp_layers",
         default=[],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="Optional decoder MLP layers after the policy core. If empty (default) decoder is identity function.",
     )
     # Critic settings. Decoder appears between policy core (RNN) and action/critic heads.
@@ -609,8 +605,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--critic_mlp_layers",
         default=[],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="Optional critic MLP layers after the policy core. If empty (default) critic is a linear function.",
     )
 
