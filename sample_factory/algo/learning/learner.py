@@ -22,7 +22,13 @@ from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.optimizers import AdamTensorFlowStyle, Lamb
 from sample_factory.algo.utils.rl_utils import gae_advantages, prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
-from sample_factory.algo.utils.tensor_dict import TensorDict, cat_tensordicts, shallow_recursive_copy
+from sample_factory.algo.utils.tensor_dict import (
+    TensorDict,
+    cat_tensordicts,
+    shallow_recursive_copy,
+    tensor_dict_to_cpu,
+    tensor_dict_to_cuda,
+)
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.cfg.configurable import Configurable
 from sample_factory.model.actor_critic import ActorCritic, create_actor_critic
@@ -532,7 +538,7 @@ class Learner(Configurable):
         """Generating minibatches for training."""
         assert self.cfg.rollout % self.cfg.recurrence == 0
         assert experience_size % batch_size == 0, f"experience size: {experience_size}, batch size: {batch_size}"
-        minibatches_per_epoch = self.cfg.num_batches_per_epoch
+        minibatches_per_epoch = experience_size // batch_size
 
         if minibatches_per_epoch == 1:
             return [None]  # single minibatch is actually the entire buffer, we don't need indices
@@ -946,10 +952,6 @@ class Learner(Configurable):
                 summaries_epoch = self.cfg.aux_num_epochs - 1
                 summaries_batch = self.cfg.num_batches_per_epoch - 1
 
-            buffer_outputs = self._compute_model_outputs(AttrDict(gpu_buffer), num_invalids)
-            gpu_buffer["action_logits"] = buffer_outputs["result"]["action_logits"]
-            del buffer_outputs
-
         for epoch in range(self.cfg.aux_num_epochs):
             with timing.add_time("aux_epoch_init"):
                 minibatches = self._get_minibatches(batch_size, experience_size)
@@ -961,8 +963,18 @@ class Learner(Configurable):
                     # current minibatch consisting of short trajectory segments with length == recurrence
                     mb = self._get_minibatch(gpu_buffer, indices)
 
+                    # move cpu buffer to cuda
+                    mb = tensor_dict_to_cuda(mb)
+                    mb["rewards_cpu"] = mb["rewards_cpu"].cpu()
+                    mb["dones_cpu"] = mb["dones_cpu"].cpu()
+
                     # enable syntactic sugar that allows us to access dict's keys as object attributes
                     mb = AttrDict(mb)
+
+                    if epoch == 0:
+                        mb_outputs = self._compute_model_outputs(mb, num_invalids)
+                        mb["action_logits"] = mb_outputs["result"]["action_logits"]
+                        del mb_outputs
 
                 with timing.add_time("aux_calculate_losses"):
                     (
@@ -1288,7 +1300,8 @@ class Learner(Configurable):
             buff, experience_size, num_invalids = self._prepare_batch(batch)
 
             if self.cfg.aux_train:
-                self.aux_batch.append((buff, experience_size, num_invalids))
+                aux_buff = tensor_dict_to_cpu(buff)
+                self.aux_batch.append((aux_buff, experience_size, num_invalids))
 
         if num_invalids >= experience_size:
             if self.cfg.with_pbt:

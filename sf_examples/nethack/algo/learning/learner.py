@@ -16,7 +16,7 @@ from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STA
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import alloc_trajectory_tensors
-from sample_factory.algo.utils.tensor_dict import TensorDict, clone_tensordict, stack_tensordicts
+from sample_factory.algo.utils.tensor_dict import TensorDict, clone_tensordict, stack_tensordicts, tensor_dict_to_cpu
 from sample_factory.algo.utils.tensor_utils import ensure_torch_tensor
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.model.model_utils import get_rnn_size
@@ -598,7 +598,8 @@ class DatasetLearner(Learner):
                 buff, experience_size, num_invalids = self._prepare_batch(batch)
 
                 if self.cfg.aux_train:
-                    self.aux_batch.append((buff, experience_size, num_invalids))
+                    aux_buff = tensor_dict_to_cpu(buff)
+                    self.aux_batch.append((aux_buff, experience_size, num_invalids))
             else:
                 experience_size = batch["dones"].shape[0] * batch["dones"].shape[1]
                 num_invalids = 0
