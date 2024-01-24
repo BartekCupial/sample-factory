@@ -478,7 +478,7 @@ class Learner(Configurable):
         valids: Tensor,
         num_invalids: int,
     ):
-        log_prob_values = value_distribution.log_prob(target)
+        log_prob_values = value_distribution.log_prob(target.unsqueeze(-1))
         value_loss = -log_prob_values
 
         value_loss = masked_select(value_loss, valids, num_invalids)
