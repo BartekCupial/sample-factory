@@ -24,6 +24,8 @@ config = {
     "use_pretrained_checkpoint": True,
     "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "kickstarting_loss_coeff": 0.5,
+    "distillation_loss_coeff": 0.0,
+    "supervised_loss_coeff": 0.0,
     "teacher_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "run_teacher_hs": False,
     "use_prev_action": True,
