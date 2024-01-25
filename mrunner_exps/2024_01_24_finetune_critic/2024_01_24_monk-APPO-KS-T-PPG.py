@@ -49,9 +49,9 @@ params_grid = [
         "seed": list(range(1)),
         "learning_rate": [0.0001],
         "freeze": [{"encoder": 0}],
-        "aux_num_epochs": [3, 6, 9],
-        "aux_train_frequency": [4, 8, 16],
-        "aux_kl_loss_coeff": [0.1, 0.5, 1.0],
+        "aux_num_epochs": [9],
+        "aux_train_frequency": [8, 16],
+        "aux_kl_loss_coeff": [1.0],
         "aux_batch_size": [4096],
     },
 ]
