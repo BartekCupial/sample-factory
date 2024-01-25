@@ -26,6 +26,7 @@ config = {
     "kickstarting_loss_coeff": 0.5,
     "distillation_loss_coeff": 0.0,
     "supervised_loss_coeff": 0.0,
+    "use_dataset": False,
     "teacher_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "run_teacher_hs": False,
     "use_prev_action": True,
