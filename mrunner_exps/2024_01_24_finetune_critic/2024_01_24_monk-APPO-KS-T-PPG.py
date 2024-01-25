@@ -35,7 +35,7 @@ config = {
     "gamma": 1.0,
     "kickstarting_loss_decay": 0.99998,
     "min_kickstarting_loss_coeff": 0.25,
-    "skip_train": 25_000_000,
+    # "skip_train": 25_000_000,
     "aux_train": True,
     "aux_num_epochs": 6,
     "aux_train_frequency": 16,
