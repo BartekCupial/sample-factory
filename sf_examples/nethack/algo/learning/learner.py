@@ -137,7 +137,7 @@ class DatasetLearner(Learner):
                 ]
             )
             <= 1
-        ), "only one regularization loss allowed at the time"
+        ), f"only one regularization loss allowed at the time, use_kickstarting_loss: {use_kickstarting_loss}, use_distillation_loss: {use_distillation_loss}, use_supervised_loss: {use_supervised_loss}."
 
         assert (
             use_supervised_loss or use_distillation_loss
