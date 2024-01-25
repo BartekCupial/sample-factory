@@ -127,6 +127,8 @@ class DatasetLearner(Learner):
         use_supervised_loss = self.cfg.supervised_loss_coeff > 0.0
         use_distillation_loss = self.cfg.distillation_loss_coeff > 0.0
         use_kickstarting_loss = self.cfg.kickstarting_loss_coeff > 0.0
+        use_distillation_loss = False
+        use_supervised_loss = False
 
         assert (
             sum(
