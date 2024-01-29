@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from typing import Callable, Dict, Optional, Tuple
 
 import nle.dataset as nld
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -63,7 +65,35 @@ class DatasetLearner(Learner):
     def init(self) -> InitModelData:
         init_model_data = super().init()
 
-        if self.cfg.use_dataset:
+        use_supervised_loss = self.cfg.supervised_loss_coeff > 0.0
+        use_distillation_loss = self.cfg.distillation_loss_coeff > 0.0
+        use_kickstarting_loss = self.cfg.kickstarting_loss_coeff > 0.0
+        use_ewc_loss = self.cfg.ewc_loss_coeff > 0.0
+
+        assert (
+            sum(
+                [
+                    use_supervised_loss,
+                    use_distillation_loss,
+                    use_kickstarting_loss,
+                    use_ewc_loss,
+                ]
+            )
+            <= 1
+        ), "only one regularization loss allowed at the time"
+
+        assert (
+            use_supervised_loss or use_distillation_loss
+        ) == self.cfg.use_dataset, (
+            "If either 'use_supervised_loss' or 'use_distillation_loss' is true, then 'use_dataset' must also be true."
+        )
+
+        self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
+        self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
+        self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
+        self.ewc_loss_func = self._ewc_loss if use_ewc_loss else lambda *_: 0.0
+
+        if self.cfg.use_dataset or use_ewc_loss:
             assert self.cfg.rollout == self.cfg.dataset_rollout
 
             dataset_batch_size = self.cfg.dataset_batch_size // self.cfg.dataset_rollout
@@ -123,30 +153,17 @@ class DatasetLearner(Learner):
                 self._iterators.append(it)
                 self._results.append(self.tp.submit(next, it))
 
-        use_supervised_loss = self.cfg.supervised_loss_coeff > 0.0
-        use_distillation_loss = self.cfg.distillation_loss_coeff > 0.0
-        use_kickstarting_loss = self.cfg.kickstarting_loss_coeff > 0.0
+        if use_ewc_loss:
+            self.params = {
+                n: p
+                for n, p in self.actor_critic.named_parameters()
+                if p.requires_grad and "critic_linear".casefold() not in n.casefold()
+            }
+            self._means = {}
+            self._precision_matrices = self._diag_fisher()
 
-        assert (
-            sum(
-                [
-                    use_supervised_loss,
-                    use_distillation_loss,
-                    use_kickstarting_loss,
-                ]
-            )
-            <= 1
-        ), "only one regularization loss allowed at the time"
-
-        assert (
-            use_supervised_loss or use_distillation_loss
-        ) == self.cfg.use_dataset, (
-            "If either 'use_supervised_loss' or 'use_distillation_loss' is true, then 'use_dataset' must also be true."
-        )
-
-        self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
-        self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
-        self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
+            for n, p in deepcopy(self.params).items():
+                self._means[n] = p.data
 
         return init_model_data
 
@@ -206,6 +223,37 @@ class DatasetLearner(Learner):
 
         return model_outputs
 
+    def _diag_fisher(self):
+        training = self.actor_critic.training
+        self.actor_critic.train(True)
+
+        precision_matrices = {}
+        for n, p in deepcopy(self.params).items():
+            p.data.zero_()
+            precision_matrices[n] = p.data
+
+        for _ in range(self.cfg.ewc_n_batches):
+            self.actor_critic.zero_grad()
+
+            dataset_mb = self._get_dataset_minibatch()
+            dataset_mb_results = self._calculate_dataset_outputs(dataset_mb)
+
+            logits = torch.flatten(dataset_mb_results["action_logits"], 0, 1)
+            logits = logits.float().requires_grad_()
+            label = logits.max(1)[1].view(-1).type(torch.LongTensor).cuda()
+            loss = nn.CrossEntropyLoss()(logits, label)
+            loss.backward()
+
+            for n, p in self.actor_critic.named_parameters():
+                if n in list(self.params.keys()):
+                    precision_matrices[n].data += p.grad.data**2 / self.cfg.ewc_n_batches
+
+        precision_matrices = {n: p for n, p in precision_matrices.items()}
+        self.actor_critic.zero_grad()
+
+        self.actor_critic.train(mode=training)
+        return precision_matrices
+
     def _supervised_loss(self, mb_results, mb, num_invalids: int):
         outputs = mb_results["action_logits"].flatten(0, 1)
         targets = mb["actions"].flatten(0, 1).long()
@@ -249,6 +297,16 @@ class DatasetLearner(Learner):
         kickstarting_loss = kickstarting_loss.mean()
 
         return kickstarting_loss
+
+    def _ewc_loss(self):
+        ewc_loss = 0
+        for n, p in self.actor_critic.named_parameters():
+            if n in list(self.params.keys()):
+                _loss = self._precision_matrices[n] * (p - self._means[n]) ** 2
+                ewc_loss += _loss.sum()
+        ewc_loss *= self.cfg.ewc_loss_coeff
+
+        return ewc_loss
 
     def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
         with torch.no_grad(), self.timing.add_time("losses_init"):
@@ -439,6 +497,9 @@ class DatasetLearner(Learner):
                 dataset_num_invalids,
             )
 
+        with self.timing.add_time("ewc_loss"):
+            ewc_loss = self.ewc_loss_func()
+
         action_distribution = (
             action_distribution if action_distribution is not None else self.actor_critic.action_distribution()
         )
@@ -451,11 +512,12 @@ class DatasetLearner(Learner):
             adv_std=adv_std,
             adv_mean=adv_mean,
         )
-        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss
+        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss + ewc_loss
         regularizer_loss_summaries = dict(
             supervised_loss=to_scalar(supervised_loss),
             distillation_loss=to_scalar(distillation_loss),
             kickstarting_loss=to_scalar(kickstarting_loss),
+            ewc_loss=to_scalar(ewc_loss),
         )
 
         return (
