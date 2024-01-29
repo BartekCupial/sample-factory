@@ -240,6 +240,8 @@ class RolloutWorker(HeartbeatStoppableEventLoopObject, Configurable):
             runner = self.env_runners[split_idx]
             complete_rollouts, episodic_stats = runner.advance_rollouts(policy_id, self.timing)
 
+            debug_log_every_n(1000, f"Worker {self.worker_idx}-{split_idx} is still alive")
+
             with self.timing.add_time("complete_rollouts"):
                 if complete_rollouts:
                     self._enqueue_complete_rollouts(complete_rollouts)
