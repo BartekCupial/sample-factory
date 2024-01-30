@@ -42,9 +42,9 @@ config = {
 # params different between exps
 params_grid = [
     {
-        "seed": list(range(1)),
+        "seed": list(range(5)),
         "freeze": [{"encoder": 0}],
-        "supervised_loss_coeff": [0.1, 0.2, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0],
+        "supervised_loss_coeff": [2.0],
     },
 ]
 
