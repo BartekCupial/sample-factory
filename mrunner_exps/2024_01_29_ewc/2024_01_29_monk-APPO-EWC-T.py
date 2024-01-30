@@ -44,7 +44,8 @@ params_grid = [
         "seed": list(range(1)),
         "freeze": [{"encoder": 0}],
         "ewc_loss_coeff": [1.0, 20.0, 400.0, 2000.0, 8000.0, 20000.0, 40000.0, 80000.0, 200000.0],
-        "ewc_n_batches": [10, 100, 1000, 10000, 30000],
+        "ewc_n_batches": [10000, 30000],
+        "heartbeat_reporting_interval": [180 * 10 * 3],
     },
 ]
 
