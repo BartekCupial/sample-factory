@@ -17,7 +17,7 @@ from sf_examples.minihack.models import MODELS_LOOKUP
 
 
 def register_minihack_envs():
-    for env_name in map(lambda x: x.name, MINIHACK_ENVS):
+    for env_name in MINIHACK_ENVS.keys():
         register_env(env_name, make_minihack_env)
 
 
