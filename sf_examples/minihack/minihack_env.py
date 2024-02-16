@@ -30,7 +30,6 @@ def get_minihack_env_specs():
 
 
 MINIHACK_ENVS = get_minihack_env_specs()
-log.info(json.dumps(list(map(lambda x: x.name, MINIHACK_ENVS)), indent=4))
 
 
 def minihack_env_by_name(name):
