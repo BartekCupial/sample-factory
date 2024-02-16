@@ -32,11 +32,16 @@ config = {
 params_grid = [
     {
         "seed": list(range(1)),
-        # "serial_mode": [True],
-        "with_wandb": [False],
-        "restart_behavior": ["overwrite"],
-        "env": ["sokoban_1a"],
-        "experiment": ["sokoban"],
+        "env": [
+            "sokoban_1a",
+            "sokoban_1b",
+            "sokoban_2a",
+            "sokoban_2b",
+            "sokoban_3a",
+            "sokoban_3b",
+            "sokoban_4a",
+            "sokoban_4b",
+        ],
     },
 ]
 
