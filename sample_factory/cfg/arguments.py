@@ -275,6 +275,18 @@ def maybe_load_from_checkpoint(cfg: Config) -> AttrDict:
     return load_from_checkpoint(cfg)
 
 
+def load_from_path(filename: str) -> AttrDict:
+    if not os.path.isfile(filename):
+        log.error("Saved parameter configuration for filename %s not found!", filename)
+
+    with open(filename, "r") as json_file:
+        json_params = json.load(json_file)
+        log.warning("Loading existing experiment configuration from %s", filename)
+        loaded_cfg = AttrDict(json_params)
+
+    return loaded_cfg
+
+
 def checkpoint_override_defaults(cfg: Config, parser) -> AttrDict:
     cfg_filename = cfg_file(cfg)
 
