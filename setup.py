@@ -14,6 +14,7 @@ with open("README.md", "r") as f:
 
 _atari_deps = ["gymnasium[atari, accept-rom-license]"]
 _mujoco_deps = ["gymnasium[mujoco]", "mujoco<2.5"]
+_minihack_deps = ["minihack", "matplotlib==3.5"]
 _nethack_deps = [
     "numba ~= 0.58",
     "pandas ~= 2.1",
@@ -78,6 +79,7 @@ setup(
         "envpool": _envpool_deps,
         "mujoco": _mujoco_deps,
         "nethack": _nethack_deps,
+        "minihack": _minihack_deps,
         "vizdoom": ["vizdoom<2.0", "gymnasium[classic_control]"],
         # "dmlab": ["dm_env"],  <-- these are just auxiliary packages, the main package has to be built from sources
     },

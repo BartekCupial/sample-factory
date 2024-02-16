@@ -111,6 +111,7 @@ trained_policies/**
 .vis/
 wandb/
 **/wandb/
+artifacts
 
 
 
