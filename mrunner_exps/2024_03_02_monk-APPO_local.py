@@ -19,17 +19,17 @@ config = {
     "use_prev_action": True,
     "model": "ScaledNet",
     "use_resnet": True,
-    "rnn_size": 1738,
-    "h_dim": 1738,
+    "rnn_size": 512,
+    "h_dim": 512,
     "gamma": 1.0,
     "heartbeat_interval": 600,
     "heartbeat_reporting_interval": 1200,
 }
 
 
-rollout = 256
-target_batch_size = 256
-expected_batch_size = 8192
+rollout = 32
+target_batch_size = 128
+expected_batch_size = 1024
 
 batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
 batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
