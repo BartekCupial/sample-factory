@@ -8,6 +8,8 @@ mrunner_auto/
 nle/
 notebooks/
 artifacts/
+nle
+minihack
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
