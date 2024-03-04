@@ -26,10 +26,9 @@ config = {
     "heartbeat_reporting_interval": 1200,
 }
 
-
 rollout = 256
-target_batch_size = 256
-expected_batch_size = 8192
+target_batch_size = 128
+expected_batch_size = 4096
 
 batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
 batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
