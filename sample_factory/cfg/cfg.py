@@ -575,7 +575,6 @@ def add_model_args(p: ArgumentParser):
     )
 
     # model core settings (core is identity function if we're not using RNNs)
-    p.add_argument("--use_rnn", default=True, type=str2bool, help="Whether to use RNN core in a policy or not")
     p.add_argument(
         "--rnn_size",
         default=512,
@@ -583,9 +582,50 @@ def add_model_args(p: ArgumentParser):
         help="Size of the RNN hidden state in recurrent model (e.g. GRU or LSTM)",
     )
     p.add_argument(
+        "--decay_hidden_states",
+        default=1.0,
+        type=float,
+        help="Explicitly decay the hidden states (0 = no history, 1 = perfect history)",
+    )
+    p.add_argument(
+        "--mamba_conv_size",
+        default=4,
+        type=int,
+        help="Size of Conv part of Mamba ssm",
+    )
+    p.add_argument(
+        "--mamba_expand",
+        default=2,
+        type=int,
+        help="Expand factor of Mamba ssm",
+    )
+    p.add_argument(
+        "--mamba_model_size",
+        default=128,
+        type=int,
+        help="Size of the Mamba d_model",
+    )
+    p.add_argument(
+        "--mamba_state_size",
+        default=4,
+        type=int,
+        help="Size of the Mamba d_state",
+    )
+    p.add_argument(
+        "--mamba_use_complex",
+        default=False,
+        type=str2bool,
+    )
+    p.add_argument(
+        "--mamba_selective_ssm",
+        default=True,
+        type=str2bool,
+    )
+
+    p.add_argument(
         "--rnn_type",
         default="gru",
-        choices=["gru", "lstm"],
+        choices=["gru", "lstm", "mamba"],
         type=str,
         help="Type of RNN cell to use if use_rnn is True",
     )
@@ -594,7 +634,7 @@ def add_model_args(p: ArgumentParser):
     # Decoder settings. Decoder appears between policy core (RNN) and action/critic heads.
     p.add_argument(
         "--decoder_mlp_layers",
-        default=[],
+        default=[512, 512],
         type=int,
         nargs="*",
         help="Optional decoder MLP layers after the policy core. If empty (default) decoder is identity function.",

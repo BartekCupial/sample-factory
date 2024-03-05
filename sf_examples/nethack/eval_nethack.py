@@ -11,6 +11,7 @@ from sf_examples.nethack.nethack_params import (
     add_extra_params_general,
     add_extra_params_learner,
     add_extra_params_model,
+    add_extra_params_model_scaled,
     add_extra_params_nethack_env,
     nethack_override_defaults,
 )
@@ -25,6 +26,7 @@ def main():  # pragma: no cover
     parser, cfg = parse_sf_args(evaluation=True)
     add_extra_params_nethack_env(parser)
     add_extra_params_model(parser)
+    add_extra_params_model_scaled(parser)
     add_extra_params_learner(parser)
     add_extra_params_general(parser)
     nethack_override_defaults(cfg.env, parser)
