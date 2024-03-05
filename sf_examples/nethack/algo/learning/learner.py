@@ -189,12 +189,16 @@ class DatasetLearner(Learner):
 
         model_outputs = []
         seq_len = mb["actions"].shape[1]
+
+        # TODO: ask Bartek how dones are handled and the stuff after dones
         for i in range(seq_len):
             # we split the forward since we want to use teacher from kickstarter
             head_outputs = self.actor_critic.forward_head(mb[:, i])
             core_outputs, new_rnn_state = self.actor_critic.forward_core(head_outputs, rnn_state)
             outputs = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
 
+            # Dealing with the done here will be the most painful part
+            # Lazy solution: mask out everything after the first done
             not_done = (1.0 - mb["done"][:, i].float()).unsqueeze(-1)
             rnn_state = new_rnn_state * not_done
             model_outputs.append(outputs)

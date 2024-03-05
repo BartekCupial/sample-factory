@@ -16,6 +16,8 @@ def get_rnn_size(cfg):
 
     if cfg.rnn_type == "lstm":
         size *= 2
+    elif cfg.rnn_type == "mamba":
+        size = (cfg.rnn_num_layers * cfg.mamba_model_size * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
 
     if not cfg.actor_critic_share_weights:
         # actor and critic need separate states
