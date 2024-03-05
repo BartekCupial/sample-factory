@@ -1,0 +1,1 @@
+python sf_examples/nethack/eval_nethack.py  --env=challenge --character=mon-hum-neu   --wandb_user=rahid --wandb_project=sp_nethack --wandb_group=rahid --with_wandb=True  --train_dir=../lstm_champion/ --sample_env_episodes 1000 --num_workers=16 --num_envs_per_worker=2
