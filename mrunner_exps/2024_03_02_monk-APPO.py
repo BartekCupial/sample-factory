@@ -19,28 +19,31 @@ config = {
     "use_prev_action": True,
     "model": "ScaledNet",
     "use_resnet": True,
-    "rnn_size": 1738,
-    "h_dim": 1738,
+    "rnn_size": 512,
+    "h_dim": 512,
     "gamma": 1.0,
     "heartbeat_interval": 600,
     "heartbeat_reporting_interval": 1200,
 }
 
-rollout = 256
-target_batch_size = 128
 expected_batch_size = 4096
-
-batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
-batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
-params_grid = [
-    {
-        "seed": list(range(5)),
-        "learning_rate": [0.0001],
-        "rollout": [rollout],
-        "batch_size": [batch_size],
-        "num_batches_per_epoch": [min(8, batches_to_accumulate)],
-    }
-]
+params_grid = []
+for rollout in [32, 64, 128]:
+    for target_batch_size in [128, 256]:
+        batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
+        batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
+        params_grid.append(
+            {
+                "seed": list(range(1)),
+                "learning_rate": [0.0001],
+                "freeze": [{"encoder": 0}],
+                "rollout": [rollout],
+                "batch_size": [batch_size],
+                "num_batches_per_epoch": [batches_to_accumulate],
+                "target_batch_size": [target_batch_size],
+                "gamma": [0.999999, 0.999],
+            }
+        )
 
 
 experiments_list = create_experiments_helper(
