@@ -6,7 +6,6 @@ import shutil
 import time
 from collections import OrderedDict, deque
 from os.path import isdir, join
-from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
