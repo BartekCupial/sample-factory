@@ -4,6 +4,7 @@ This is taken from the original Dungeons&Data implementation.
 
 import importlib.resources
 from concurrent.futures import ThreadPoolExecutor
+import os
 from typing import Optional, Tuple
 
 import cv2
@@ -46,7 +47,6 @@ def _initialize_char_array(font_size, rescale_font_size):
     if rescale_font_size is given, assume it is (width, height)
     Returns a np array of (num_chars, num_colors, char_height, char_width, 3)
     """
-    print(SMALL_FONT_PATH)
     font = ImageFont.truetype(SMALL_FONT_PATH, font_size)
     dummy_text = "".join([(chr(i) if chr(i).isprintable() else " ") for i in range(256)])
     _, _, image_width, image_height = font.getbbox(dummy_text)
