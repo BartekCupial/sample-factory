@@ -36,11 +36,9 @@ for rollout in [32, 64, 128]:
             {
                 "seed": list(range(1)),
                 "learning_rate": [0.0001],
-                "freeze": [{"encoder": 0}],
                 "rollout": [rollout],
                 "batch_size": [batch_size],
                 "num_batches_per_epoch": [batches_to_accumulate],
-                "target_batch_size": [target_batch_size],
                 "gamma": [0.999999, 0.999],
             }
         )
