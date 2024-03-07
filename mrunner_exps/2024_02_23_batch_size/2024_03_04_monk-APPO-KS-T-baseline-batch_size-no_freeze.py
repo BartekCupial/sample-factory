@@ -9,7 +9,7 @@ config = {
     "exp_point": "monk-APPO-KS-T",
     "train_for_env_steps": 500_000_000,
     "group": "monk-APPO-KS-T",
-    "character": "@",
+    "character": "mon-hum-neu-mal",
     "num_workers": 16,
     "num_envs_per_worker": 32,
     "worker_num_splits": 2,
