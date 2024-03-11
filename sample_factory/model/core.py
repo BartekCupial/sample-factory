@@ -142,7 +142,9 @@ class ModelCoreRNN(ModelCore):
         self.rnn_num_layers = cfg.rnn_num_layers
 
     def forward(self, head_output, rnn_states):
-        is_seq = not torch.is_tensor(head_output)
+        # TODO: why this worked without batch_first=True?
+        is_seq = head_output.ndim == 3
+        print(rnn_states.shape)
 
         rnn_states = rnn_states * self.cfg.decay_hidden_states
 
@@ -158,7 +160,6 @@ class ModelCoreRNN(ModelCore):
         if self.is_mamba or self.is_gru:
             x, new_rnn_states = self.core(head_output, rnn_states.contiguous())
         else:
-            # Just give zeros to LSTM
             h, c = torch.split(rnn_states, self.cfg.rnn_size, dim=2)
             x, (h, c) = self.core(head_output, (h.contiguous(), c.contiguous()))
             new_rnn_states = torch.cat((h, c), dim=2)

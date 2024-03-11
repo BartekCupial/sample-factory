@@ -34,7 +34,6 @@ config = {
     "dataset_num_workers": 8,
     "supervised_loss_coeff": 1.0,
     "behavioral_clone": True,
-    "process_seq_in_batch_mode": True,
 
     # Athena
     # "db_path": "/ttyrecs/ttyrecs.db",
@@ -62,12 +61,14 @@ base_params_grid = [
         "mamba_model_size": [256],
         "rnn_num_layers": [3],
         "mamba_use_complex": [False],
+        "process_seq_in_batch_mode": [False, True],
     },
     {
         "seed": list(range(1)),
         "rnn_type": ["lstm"],
         "learning_rate": [1e-4],
         "rnn_size": [512],
+        "process_seq_in_batch_mode": [True, False],
     },
 ]
 
@@ -76,7 +77,7 @@ base_params_grid = [
 # to batch size treated as num samples
 params_grid = []
 for grid in base_params_grid:
-    for rollout in [16, 32, 64, 128]:
+    for rollout in [16, 32]:
         new_grid = grid.copy()
         new_grid["rollout"] = [rollout]
         new_grid["dataset_rollout"] = [rollout]

@@ -3,7 +3,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from sample_pretrain.model.mamba_simple import Mamba, Block
+from sample_factory.model.mamba_simple import Mamba, Block
 
 try:
     from mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn

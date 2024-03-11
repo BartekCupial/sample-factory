@@ -184,21 +184,17 @@ class DatasetLearner(Learner):
         self.step()
         return normalized_batch
 
-    def _calculate_dataset_outputs(self, mb: TensorDict):
+    def _calculate_dataset_outputs_seq(self, mb: TensorDict):
         rnn_state = self.rnn_states[self.prev_idx]
-
         model_outputs = []
         seq_len = mb["actions"].shape[1]
 
-        # TODO: ask Bartek how dones are handled and the stuff after dones
         for i in range(seq_len):
             # we split the forward since we want to use teacher from kickstarter
             head_outputs = self.actor_critic.forward_head(mb[:, i])
             core_outputs, new_rnn_state = self.actor_critic.forward_core(head_outputs, rnn_state)
             outputs = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
 
-            # Dealing with the done here will be the most painful part
-            # Lazy solution: mask out everything after the first done
             not_done = (1.0 - mb["done"][:, i].float()).unsqueeze(-1)
             rnn_state = new_rnn_state * not_done
             model_outputs.append(outputs)
@@ -206,15 +202,64 @@ class DatasetLearner(Learner):
         # update rnn_states for next iteration
         self.rnn_states[self.prev_idx] = rnn_state.detach()
 
+        # Dict[key, Tensor: [batch_size, seq_len, ...]]
         model_outputs = stack_tensordicts(model_outputs, dim=1)
 
-        return model_outputs
+        valids = torch.ones_like(mb["done"]).bool()
 
-    def _supervised_loss(self, mb_results, mb, num_invalids: int):
+        return model_outputs, valids
+
+    def _calculate_dataset_outputs_batch(self, mb: TensorDict):
+        rnn_state = self.rnn_states[self.prev_idx]
+
+        model_outputs = []
+        batch_size = mb["actions"].shape[0]
+        seq_len = mb["actions"].shape[1]
+
+
+        # Process Head
+        flat_model_inputs = TensorDict()
+        for key, item in mb.items():
+            flat_model_inputs[key] = item.view(batch_size * seq_len, *item.shape[2:])
+        head_outputs = self.actor_critic.forward_head(flat_model_inputs)
+
+        # Process Core
+        # [B, L, ...]
+        head_outputs = head_outputs.view(batch_size, seq_len, *head_outputs.shape[1:])
+        # [L, B, ...]
+        head_outputs = head_outputs.transpose(0, 1)
+        core_outputs, new_rnn_state = self.actor_critic.forward_core(head_outputs, rnn_state)
+
+        # Process tail
+        # [B, L, ...]
+        core_outputs = core_outputs.transpose(0, 1)
+        # [B * L, ...]
+        core_outputs = core_outputs.reshape(batch_size * seq_len, *core_outputs.shape[2:])
+        model_outputs = self.actor_critic.forward_tail(core_outputs,
+                                                       values_only=False,
+                                                       sample_actions=False)
+        for key, item in model_outputs.items():
+            model_outputs[key] = item.view(batch_size, seq_len, *item.shape[1:])
+
+        # Mask denoting the valid timesteps in the sequence. Ignore everything after episode finish.
+        after_done = torch.roll(mb["done"], shifts=1, dims=1)
+        after_done[:, 0] = 0
+        valids = torch.logical_not(after_done.cumsum(1).bool())
+
+        # If the episode ended, we want to reset the RNN state
+        new_rnn_state = new_rnn_state * valids[:, -1].unsqueeze(-1).float()
+
+        # update rnn_states for next iteration
+        self.rnn_states[self.prev_idx] = new_rnn_state.detach()
+
+        return model_outputs, valids
+
+    def _supervised_loss(self, mb_results, mb, valids, num_invalids: int):
         outputs = mb_results["action_logits"].flatten(0, 1)
         targets = mb["actions"].flatten(0, 1).long()
         supervised_loss = F.cross_entropy(outputs, targets, reduction="none")
-        # supervised_loss = masked_select(supervised_loss, valids, num_invalids)
+        valids = valids.flatten(0, 1)
+        supervised_loss = masked_select(supervised_loss, valids, num_invalids)
         supervised_loss *= self.cfg.supervised_loss_coeff
         supervised_loss = supervised_loss.mean()
 
@@ -422,21 +467,27 @@ class DatasetLearner(Learner):
         with self.timing.add_time("prepare_dataset_batch"):
             if self.cfg.use_dataset:
                 dataset_mb = self._get_dataset_minibatch()
-                dataset_mb_results = self._calculate_dataset_outputs(dataset_mb)
-                dataset_num_invalids = 0
+                if self.cfg.process_seq_in_batch_mode:
+                    dataset_mb_results, valids = self._calculate_dataset_outputs_batch(dataset_mb)
+                else:
+                    dataset_mb_results, valids = self._calculate_dataset_outputs_seq(dataset_mb)
+                dataset_num_invalids = torch.numel(valids) - valids.sum()
             else:
                 dataset_mb = None
                 dataset_mb_results = None
+                valids = None 
                 dataset_num_invalids = 0
 
         with self.timing.add_time("supervised_loss"):
             supervised_loss = self.supervised_loss_func(
                 dataset_mb_results,
                 dataset_mb,
+                valids,
                 dataset_num_invalids,
             )
 
         with self.timing.add_time("distillation_loss"):
+            # TODO: implement valids here as well
             distillation_loss = self.distillation_loss_func(
                 dataset_mb_results,
                 dataset_mb,

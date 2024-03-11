@@ -20,6 +20,7 @@ config = {
     "wandb_user": "rahid",
     "wandb_project": "sp_nethack",
     "wandb_group": "rahid",
+    "wandb_tags": [name],
     # "dataset_rollout": 32,
     # "dataset_batch_size": 8192,  # this equals bs = 256, 256 * 32 = 8192
     # "distillation_loss_coeff": 0.2,
@@ -34,21 +35,20 @@ config = {
     "dataset_num_workers": 8,
     "supervised_loss_coeff": 1.0,
     "behavioral_clone": True,
-    "process_seq_in_batch_mode": True,
 
     # Athena
-    # "db_path": "/ttyrecs/ttyrecs.db",
-    # "dataset_name": "autoascend",
-    # "batch_size": 32,
-    # "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
-    # "with_wandb": True,
+    "db_path": "/ttyrecs/ttyrecs.db",
+    "dataset_name": "autoascend",
+    "batch_size": 32,
+    "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
+    "with_wandb": True,
 
     # Local
-    "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
-    "dataset_name": "nld-aa-taster-v1",
-    "batch_size": 4,
-    "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
+    # "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
+    # "dataset_name": "nld-aa-taster-v1",
+    # "batch_size": 4,
+    # "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
+    # "with_wandb": False,
 }
 
 # params different between exps
@@ -62,12 +62,16 @@ base_params_grid = [
         "mamba_model_size": [256],
         "rnn_num_layers": [3],
         "mamba_use_complex": [False],
+        "process_seq_in_batch_mode": [True, False],
+        "model": ["ScaledNet", "ChaoticDwarvenGPT5"],
     },
     {
         "seed": list(range(1)),
         "rnn_type": ["lstm"],
         "learning_rate": [1e-4],
         "rnn_size": [512],
+        "process_seq_in_batch_mode": [True, False],
+        "model": ["ScaledNet", "ChaoticDwarvenGPT5"],
     },
 ]
 
@@ -76,7 +80,7 @@ base_params_grid = [
 # to batch size treated as num samples
 params_grid = []
 for grid in base_params_grid:
-    for rollout in [16, 32, 64, 128]:
+    for rollout in [32]:
         new_grid = grid.copy()
         new_grid["rollout"] = [rollout]
         new_grid["dataset_rollout"] = [rollout]

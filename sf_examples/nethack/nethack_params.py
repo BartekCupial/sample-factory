@@ -22,6 +22,7 @@ def add_extra_params_nethack_env(parser):
     p.add_argument("--crop_dim", type=int, default=18)
     p.add_argument("--pixel_size", type=int, default=6)
     p.add_argument("--reward_shaping", type=bool, default=False)
+    p.add_argument("--process_seq_in_batch_mode", type=str2bool, default=False)
 
 
 def add_extra_params_model(parser):
