@@ -16,10 +16,10 @@ config = {
     "rollout": 32,
     "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
     "async_rl": True,
-    "serial_mode": True,
+    "serial_mode": False,
     "wandb_user": "e-dobrowolska",
     "wandb_project": "nethack",
-    "wandb_group": "monk-appo",
+    "wandb_group": "freeze",
     "with_wandb": True,
     "use_prev_action": True,
     "model": "ScaledNet",
@@ -29,7 +29,7 @@ config = {
     "gamma": 1.0,
     "skip_train": 25_000_000,
     "use_pretrained_checkpoint": True,
-    "model_path": "train_dir/pretrain_critic_01_18",
+    "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/pretrain_critic_01_18",
     "lr_schedule": "linear_decay",
     "heartbeat_interval": 600,
     "heartbeat_reporting_interval": 1200,
@@ -46,7 +46,7 @@ params_grid = [
     {
         "seed": list(range(1)),
         "learning_rate": [0.0001],
-        "freeze": [{"encoder": 0}],
+        "freeze": [{}, {"encoder": 0}, {"core": 0}, {"encoder":0, "core":0}],
         "rollout": [rollout],
         "batch_size": [batch_size],  # 32 * 512, 64 * 256, 128 * 128
         "num_batches_per_epoch": [min(8, batches_to_accumulate)],

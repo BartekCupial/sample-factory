@@ -2,7 +2,6 @@ from mrunner.helpers.specification_helper import create_experiments_helper
 
 name = globals()["script"][:-3]
 
-# params for all exps
 config = {
     "env": "challenge",
     "exp_tags": [name],
@@ -18,6 +17,10 @@ config = {
     "async_rl": True,
     "serial_mode": False,
     "use_prev_action": True,
+    "wandb_user": "e-dobrowolska",
+    "wandb_project": "nethack",
+    "wandb_group": "2try",
+    "with_wandb": True,
 }
 
 # params different between exps
