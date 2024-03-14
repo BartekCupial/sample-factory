@@ -218,7 +218,6 @@ class DatasetLearner(Learner):
         batch_size = mb["actions"].shape[0]
         seq_len = mb["actions"].shape[1]
 
-
         # Process Head
         flat_model_inputs = TensorDict()
         for key, item in mb.items():
@@ -249,6 +248,7 @@ class DatasetLearner(Learner):
         valids = torch.logical_not(after_done.cumsum(1).bool())
 
         # If the episode ended, we want to reset the RNN state
+        # TODO: this is imperfect. The RNN state would not be non-zero.
         new_rnn_state = new_rnn_state * valids[:, -1].unsqueeze(-1).float()
 
         # update rnn_states for next iteration
@@ -723,6 +723,7 @@ class DatasetLearner(Learner):
                         for key, value in regularizer_loss_summaries.items():
                             stats_and_summaries[key] = value
 
+                        # TODO: log optimizer step
                         stats_and_summaries["kickstarting_loss_coeff"] = self.cfg.kickstarting_loss_coeff
                         stats_and_summaries["distillation_loss_coeff"] = self.cfg.distillation_loss_coeff
                         stats_and_summaries["supervised_loss_decay"] = self.cfg.supervised_loss_decay

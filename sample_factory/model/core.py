@@ -1,14 +1,15 @@
 from abc import ABC
 
+from mamba_ssm.utils.generation import InferenceParams
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from sample_factory.model.mamba import MixerModel
 from sample_factory.model.model_utils import ModelModule
+from sample_factory.model.nanogpt import GPTConfig, GPT
 from sample_factory.utils.typing import Config
 
-from mamba_ssm.utils.generation import InferenceParams
 
 
 class ModelCore(ModelModule, ABC):
@@ -116,6 +117,7 @@ class ModelCoreRNN(ModelCore):
         self.cfg = cfg
         self.is_gru = False
         self.is_mamba = False
+        self.is_nanogpt = False
 
         cfg.rnn_input_size = input_size
 
@@ -135,6 +137,24 @@ class ModelCoreRNN(ModelCore):
                                     num_layers=cfg.rnn_num_layers,
                                     use_complex=cfg.mamba_use_complex,
                                     selective=cfg.mamba_selective_ssm)
+        elif cfg.rnn_type == "nanogpt":
+            self.is_nanogpt = True
+            GPT_cfg = GPTConfig(
+                input_size=input_size,
+                output_size=cfg.rnn_size,
+                num_layers=cfg.rnn_num_layers,
+                d_model=cfg.nanogpt_model_size,
+                n_head=cfg.nanogpt_n_head,
+                dropout=cfg.nanogpt_dropout,
+                # TODO: have a separate parameter for block size
+                block_size=cfg.rollout,
+                relative_positional_embeddings=cfg.nanogpt_relative_embed,
+                linear_embedding=cfg.nanogpt_linear_embed,
+
+            )
+            self.core = GPT(GPT_cfg)
+
+
         else:
             raise RuntimeError(f"Unknown RNN type {cfg.rnn_type}")
 
@@ -150,13 +170,14 @@ class ModelCoreRNN(ModelCore):
         if not is_seq:
             head_output = head_output.unsqueeze(0)
 
-        if self.rnn_num_layers > 1:
-            rnn_states = rnn_states.view(rnn_states.size(0), self.cfg.rnn_num_layers, -1)
-            rnn_states = rnn_states.permute(1, 0, 2)
-        else:
-            rnn_states = rnn_states.unsqueeze(0)
+        if not self.is_nanogpt:
+            if self.rnn_num_layers > 1:
+                rnn_states = rnn_states.view(rnn_states.size(0), self.cfg.rnn_num_layers, -1)
+                rnn_states = rnn_states.permute(1, 0, 2)
+            else:
+                rnn_states = rnn_states.unsqueeze(0)
 
-        if self.is_mamba or self.is_gru:
+        if self.is_mamba or self.is_gru or self.is_nanogpt:
             x, new_rnn_states = self.core(head_output, rnn_states.contiguous())
         else:
             # Just give zeros to LSTM
@@ -167,11 +188,12 @@ class ModelCoreRNN(ModelCore):
         if not is_seq:
             x = x.squeeze(0)
 
-        if self.rnn_num_layers > 1:
-            new_rnn_states = new_rnn_states.permute(1, 0, 2)
-            new_rnn_states = new_rnn_states.reshape(new_rnn_states.size(0), -1)
-        else:
-            new_rnn_states = new_rnn_states.squeeze(0)
+        if not self.is_nanogpt:
+            if self.rnn_num_layers > 1:
+                new_rnn_states = new_rnn_states.permute(1, 0, 2)
+                new_rnn_states = new_rnn_states.reshape(new_rnn_states.size(0), -1)
+            else:
+                new_rnn_states = new_rnn_states.squeeze(0)
 
         return x, new_rnn_states
 

@@ -595,9 +595,36 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--rnn_type",
         default="gru",
-        choices=["gru", "lstm", "mamba"],
+        choices=["gru", "lstm", "mamba", "nanogpt"],
         type=str,
         help="Type of RNN cell to use if use_rnn is True",
+    )
+    p.add_argument(
+        "--nanogpt_model_size",
+        default=128,
+        type=int,
+        help="Size of the nanogpt d_model",
+    )
+    p.add_argument(
+        "--nanogpt_n_head",
+        default=128,
+        type=int,
+        help="Number of heads in nanogpt attention",
+    )
+    p.add_argument(
+        "--nanogpt_dropout",
+        default=0.,
+        type=float,
+    )
+    p.add_argument(
+        "--nanogpt_relative_embed",
+        default=True,
+        type=str2bool,
+    )
+    p.add_argument(
+        "--nanogpt_linear_embed",
+        default=False,
+        type=str2bool,
     )
     p.add_argument("--rnn_num_layers", default=1, type=int, help="Number of RNN layers to use if use_rnn is True")
 
