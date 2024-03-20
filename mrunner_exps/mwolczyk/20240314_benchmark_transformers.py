@@ -37,18 +37,18 @@ config = {
     "behavioral_clone": True,
 
     # Athena
-    # "db_path": "/ttyrecs/ttyrecs.db",
-    # "dataset_name": "autoascend",
-    # "batch_size": 32,
-    # "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
-    # "with_wandb": True,
+    "db_path": "/ttyrecs/ttyrecs.db",
+    "dataset_name": "autoascend",
+    "batch_size": 32,
+    "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
+    "with_wandb": True,
 
     # Local
-    "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
-    "dataset_name": "nld-aa-taster-v1",
-    "batch_size": 4,
-    "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
+    # "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
+    # "dataset_name": "nld-aa-taster-v1",
+    # "batch_size": 4,
+    # "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
+    # "with_wandb": False,
 }
 
 # params different between exps

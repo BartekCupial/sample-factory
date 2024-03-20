@@ -14,6 +14,47 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+class RoPE(nn.Module):
+    # features are paired x_i, x_{i + d_head/2}
+    def __init__(self, dhead, length):
+        super().__init__()
+        self.dhead = dhead
+        self.length = length
+        angle_exponents = torch.arange(0, dhead, 2) / dhead
+        angles = torch.pow(1 / 10000, angle_exponents).reshape(1, -1)
+        angle_per_token = angles * torch.arange(0, length).reshape(-1, 1)
+        self.register_buffer("sin", torch.sin(angle_per_token).repeat(1, 2))
+        self.register_buffer("cos", torch.cos(angle_per_token).repeat(1, 2))
+
+    def forward(self, x):
+        y1, y2 = torch.chunk(x, chunks=2, dim=-1)
+        x_rotated = torch.cat([-y2, y1], dim=-1)
+        return x * self.cos + x_rotated * self.sin
+
+
+class SineEmbedding(nn.Module):
+
+    def __init__(self, seq_length, d_model):
+        super().__init__()
+        self.seq_length = seq_length
+        self.d_model = d_model
+
+        if self.d_model % 2 != 0:
+            raise ValueError("Cannot use sin/cos positional encoding with "
+                             "odd dim (got dim={:d})".format(self.d_model))
+        self.div_term = torch.exp((torch.arange(0, self.d_model, 2, dtype=torch.float) *
+                                  -(math.log(10000.0) / self.d_model)))
+
+    def forward(self, position):
+        # position - [bs, seqlen]
+        pe = torch.zeros(position.shape[0], self.seq_length, self.d_model, device=position.device)
+        position = position.unsqueeze(-1)  # [bs, seqlen, 1]
+
+        pe[..., 0::2] = torch.sin(position.float() * self.div_term.to(position.device))
+        pe[..., 1::2] = torch.cos(position.float() * self.div_term.to(position.device))
+        return pe  # [bs, seqlen, d_model]
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -42,12 +83,20 @@ class CausalSelfAttention(nn.Module):
         self.d_model = config.d_model
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') and False
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+
+        bias = torch.tril(torch.ones(config.block_size, config.block_size))
+        bias = bias.view(1, 1, config.block_size, config.block_size)
+        self.register_buffer("bias", bias)
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                        .view(1, 1, config.block_size, config.block_size))
+
+        if config.embedding_type == "rope":
+            self.rope = RoPE(config.d_model // config.n_head, config.block_size)
+            self.use_rope = True
+        else:
+            self.use_rope = False
 
     def forward(self, x, mask=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (d_model)
@@ -58,19 +107,27 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
+        if self.use_rope:
+            q = self.rope(q)
+            k = self.rope(k)
+
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        # TODO: check flash attention later
-        if self.flash and False:
+
+        if mask is not None:
+            causal_mask = self.bias[:,:,:T,:T] == 1
+            full_mask = torch.logical_and(mask, causal_mask)
+            # If the last token is False, then set True to avoid NaNs
+            full_mask[full_mask[:, :, :, -1] == False] = True
+        else:
+            full_mask = None
+        if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=full_mask, dropout_p=self.dropout if self.training else 0, is_causal=full_mask is None)
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             # (B, nh, T, T)
-            causal_mask = self.bias[:,:,:T,:T] == 1
-            if mask is not None:
-                full_mask = torch.logical_and(mask, causal_mask)
-            else:
+            if full_mask is None:
                 full_mask = causal_mask
 
             att = att.masked_fill(torch.logical_not(full_mask), float('-inf'))
@@ -82,8 +139,6 @@ class CausalSelfAttention(nn.Module):
         # output projection
         y = self.resid_dropout(self.c_proj(y))
 
-        # TODO: find a better way to deal with the mask
-        y = torch.nan_to_num(y, 0.)
         return y
 
 class MLP(nn.Module):
@@ -122,6 +177,7 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -132,26 +188,40 @@ class GPTConfig:
     d_model: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    relative_positional_embeddings: bool = True
-    linear_embedding: bool = False
+    embedding_type: str = "table"  # table, linear, rope, sine
+    relative_timesteps: bool = True  # use absolute timestep idx or relative (t=0 is start of the trajectory vs t=0 is the start of the chunk)
 
 class GPT(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.block_size is not None
-        assert config.linear_embedding or config.relative_positional_embeddings
         self.config = config
 
-        # TODO: what to do with the embedding size? Linear layer?
-        self.transformer = nn.ModuleDict({
+        if self.config.embedding_type == "table":
+            wpe = nn.Embedding(config.block_size, config.d_model)
+        elif self.config.embedding_type == "linear":
+            wpe = nn.Linear(1, config.d_model)
+        elif self.config.embedding_type == "sine":
+            wpe = SineEmbedding(config.block_size, config.d_model)
+
+        # Only linear and sine embeddings support absolute timesteps
+        assert config.relative_timesteps or config.embedding_type in ["linear", "sine"]
+
+        transformer_modules = {
             "input_projection": nn.Linear(config.input_size, config.d_model, bias=config.bias),
             "output_projection": nn.Linear(config.d_model, config.output_size, bias=config.bias),
-            "wpe": nn.Linear(1, config.d_model) if self.config.linear_embedding else nn.Embedding(config.block_size, config.d_model),
             "drop": nn.Dropout(config.dropout),
             "h": nn.ModuleList([Block(config) for _ in range(config.num_layers)]),
             "ln_f": LayerNorm(config.d_model, bias=config.bias),
-        })
+        }
+
+        if self.config.embedding_type in ["table", "linear"]:
+            transformer_modules["wpe"] = wpe
+        elif self.config.embedding_type == "sine":
+            self.wpe = wpe
+
+        self.transformer = nn.ModuleDict(transformer_modules)
 
         # init all weights
         self.apply(self._init_weights)
@@ -171,7 +241,7 @@ class GPT(nn.Module):
         params are actually used as weights in the final layer, so we include them.
         """
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
+        if non_embedding and self.config.embedding_type in ["table", "linear"]:
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
@@ -183,10 +253,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, x, context):
-        # x: [seq_len, batch_size, ...] and we would like [batch_size, seq_len, ...]
-        x = x.permute(1, 0, 2)
-
+    def _unpack_context(self, context, new_seqlen, device):
         # reshape and unpack context:
         # [batch_size, seq_len, d_model + 2] -> three tensors:
         # tokens: [batch_size, seq_len, d_model],
@@ -198,15 +265,33 @@ class GPT(nn.Module):
         context = context[:, :, :-2]
 
         # token mask for the newtokens should be 1
-        ones_row = torch.ones([context_mask.shape[0], x.shape[1]],
+        ones_row = torch.ones([context_mask.shape[0], new_seqlen],
                               device=context_mask.device, dtype=context_mask.dtype)
         context_mask = torch.cat([context_mask, ones_row], dim=-1)
 
         # create new timesteps for the new tokens
-        new_timesteps = torch.arange(x.shape[1], dtype=torch.float, device=x.device).view(1, -1) + 1
+        new_timesteps = torch.arange(new_seqlen, dtype=torch.float, device=device).view(1, -1) + 1
         new_timesteps = new_timesteps + context_timesteps[:, -1].view(-1, 1)
 
         context_timesteps = torch.cat([context_timesteps, new_timesteps], dim=-1)
+
+        # We need to make room for the new tokens
+        context = context[:, new_seqlen:]
+        context_timesteps = context_timesteps[:, new_seqlen:]
+        context_mask = context_mask[:, new_seqlen:]
+
+        return context, context_mask, context_timesteps
+
+    def forward(self, x, context):
+        if isinstance(x, torch.nn.utils.rnn.PackedSequence):
+            x, lens = pad_packed_sequence(x, batch_first=False, padding_value=0.0)
+            to_repack = True
+        else:
+            to_repack = False
+
+        # x: [seq_len, batch_size, ...] and we would like [batch_size, seq_len, ...]
+        x = x.permute(1, 0, 2)
+        context, context_mask, context_timesteps = self._unpack_context(context, x.shape[1], x.device)
 
         x, context, context_mask, context_timesteps = self._forward(
                 x, context, context_mask, context_timesteps)
@@ -215,43 +300,45 @@ class GPT(nn.Module):
         context = context.view(-1, self.config.block_size * (self.config.d_model + 2))
 
         x = x.permute(1, 0, 2)
+
+        if to_repack:
+            x = pack_padded_sequence(x, lens, batch_first=False, enforce_sorted=False)
         return x, context
+
+    def _get_positional_embedding(self, context, context_timesteps):
+        if self.config.relative_timesteps:
+            timesteps = torch.arange(self.config.block_size, dtype=torch.float, device=context.device)  # [seqlen]
+            timesteps = timesteps.view(1, -1).repeat(context_timesteps.shape[0], 1)  # [bs, seqlen]
+        else:
+            timesteps = context_timesteps  # [bs, seqlen]
+
+        if self.config.embedding_type == "table":
+            pos_emb = self.transformer.wpe(timesteps.long())
+        elif self.config.embedding_type == "linear":
+            pos_emb = self.transformer.wpe(timesteps.unsqueeze(-1))
+        elif self.config.embedding_type == "sine":
+            pos_emb = self.wpe(timesteps)
+        elif self.config.embedding_type == "rope":
+            pos_emb = torch.zeros(context.shape[0], context.shape[1], self.config.d_model,
+                                  device=context.device, dtype=context.dtype)
+        return pos_emb  # [bs, seqlen, d_model]
+
+
 
     def _forward(self, x, context, context_mask, context_timesteps):
         new_batch_size, new_seqlen, _ = x.size()
         old_batch_size, old_seqlen, _ = context.size()
 
-        seqlen = new_seqlen + old_seqlen
         assert old_batch_size == new_batch_size, f"Batch size mismatch: {old_batch_size} != {new_batch_size}"
 
-        # [t, 1]
-
-        timesteps = torch.arange(self.config.block_size, dtype=torch.float, device=x.device)
+        
 
         # forward the GPT model itself
         x = self.transformer.input_projection(x)  # shape (b, t, d_model)
 
         context = torch.cat((context, x), dim=1)
 
-        if ((context_timesteps == 0).any() or not context_mask.all()) and x.shape[1] > 1:
-            print("new seqlen", x.shape[1])
-            print("context timesteps", context_timesteps)
-            print("context mask", context_mask)
-
-        # Get only the last block_size tokens
-        context_start_idx = max(0, seqlen - self.config.block_size)
-        context = context[:, context_start_idx:]
-        context_timesteps = context_timesteps[:, context_start_idx:]
-        context_mask = context_mask[:, context_start_idx:]
-
-        if self.config.relative_positional_embeddings:
-            if not self.config.linear_embedding:
-                timesteps = timesteps.long()
-            else:
-                timesteps = timesteps.unsqueeze(-1)
-            pos_emb = self.transformer.wpe(timesteps) # [b, t, d_model]
-        else:
-            pos_emb = self.transformer.wpe(context_timesteps.unsqueeze(-1))  # position embeddings of shape (b, t, d_model)
+        pos_emb = self._get_positional_embedding(context, context_timesteps)
 
         # Reshape the context mask to fit the attention layers
         context_mask_2d = (context_mask.unsqueeze(2) * context_mask.unsqueeze(1)).unsqueeze(1)
@@ -259,7 +346,6 @@ class GPT(nn.Module):
         x = self.transformer.drop(context + pos_emb)
         for idx, block in enumerate(self.transformer.h):
             x = block(x, context_mask_2d)
-            # x = block(x, None)
         x = self.transformer.ln_f(x)
         x = self.transformer.output_projection(x)  # shape (b, t, output_siz)
 

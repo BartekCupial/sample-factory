@@ -21,12 +21,12 @@ def add_basic_cli_args(p: ArgumentParser):
     p.add_argument("--train_dir", default=join(os.getcwd(), "train_dir"), type=str, help="Root for all experiments")
     p.add_argument(
         "--restart_behavior",
-        default="resume",
+        default="overwrite",
         choices=["resume", "restart", "overwrite"],
         type=str,
-        help='How to handle the experiment if the directory with the same name already exists. "resume" (default) will resume the experiment, '
+        help='How to handle the experiment if the directory with the same name already exists. "resume" will resume the experiment, '
         '"restart" will preserve the existing experiment folder under a different name (with "old" suffix) and will start training from scratch, '
-        '"overwrite" will delete the existing experiment folder and start from scratch. '
+        '"overwrite" (default) will delete the existing experiment folder and start from scratch. '
         "This parameter does not have any effect if the experiment directory does not exist.",
     )
 
@@ -607,7 +607,7 @@ def add_model_args(p: ArgumentParser):
     )
     p.add_argument(
         "--nanogpt_n_head",
-        default=128,
+        default=8,
         type=int,
         help="Number of heads in nanogpt attention",
     )
@@ -617,14 +617,15 @@ def add_model_args(p: ArgumentParser):
         type=float,
     )
     p.add_argument(
-        "--nanogpt_relative_embed",
+        "--nanogpt_relative_timesteps",
         default=True,
         type=str2bool,
     )
     p.add_argument(
-        "--nanogpt_linear_embed",
-        default=False,
-        type=str2bool,
+        "--nanogpt_embedding_type",
+        default="table",
+        type=str,
+        choices=["table", "sine", "rope", "linear"],
     )
     p.add_argument("--rnn_num_layers", default=1, type=int, help="Number of RNN layers to use if use_rnn is True")
 

@@ -192,6 +192,7 @@ class DatasetLearner(Learner):
         for i in range(seq_len):
             # we split the forward since we want to use teacher from kickstarter
             head_outputs = self.actor_critic.forward_head(mb[:, i])
+
             core_outputs, new_rnn_state = self.actor_critic.forward_core(head_outputs, rnn_state)
             outputs = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
 
