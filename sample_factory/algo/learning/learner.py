@@ -858,6 +858,7 @@ class Learner(Configurable):
         stats = AttrDict()
 
         stats.env_steps = self.env_steps
+        stats.train_steps = self.train_step
         stats.lr = self.curr_lr
         stats.actual_lr = train_loop_vars.actual_lr  # potentially scaled because of masked data
 
