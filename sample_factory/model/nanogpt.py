@@ -116,10 +116,12 @@ class CausalSelfAttention(nn.Module):
         if mask is not None:
             causal_mask = self.bias[:,:,:T,:T] == 1
             full_mask = torch.logical_and(mask, causal_mask)
-            # If the last token is False, then set True to avoid NaNs
-            full_mask[full_mask[:, :, :, -1] == False] = True
+            # If all tokens in a row are masked, then set True to avoid NaNs
+            empty_rows = torch.logical_not(torch.any(full_mask, dim=-1))
+            full_mask[empty_rows] = True
         else:
             full_mask = None
+
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=full_mask, dropout_p=self.dropout if self.training else 0, is_causal=full_mask is None)

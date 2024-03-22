@@ -15,7 +15,6 @@ config = {
     "worker_num_splits": 2,
     "rollout": 32,
     "async_rl": True,
-    "serial_mode": False,
     "save_milestones_ith": 10_000_000,
     "wandb_user": "rahid",
     "wandb_project": "sp_nethack",
@@ -43,13 +42,15 @@ config = {
     "batch_size": 32,
     "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
+    "serial_mode": False,
 
     # Local
     # "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
     # "dataset_name": "nld-aa-taster-v1",
     # "batch_size": 4,
     # "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
-    # "with_wandb": True,
+    # "with_wandb": False,
+    # "serial_mode": True,
 }
 
 # params different between exps

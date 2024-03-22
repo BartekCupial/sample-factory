@@ -22,14 +22,17 @@ config = {
     "wandb_user": "rahid",
     "wandb_project": "sp_nethack",
     "wandb_group": "rahid",
-    "with_wandb": False,
     "model": "ScaledNet",
+    "heartbeat_interval": 600,
+    "heartbeat_reporting_interval": 1200,
 
     # Athena
-    # "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
+    "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
+    "with_wandb": True,
 
     # Local
-    "batch_size": 64,  # this equals bs = 128, 128 * 32 = 4096
+    # "batch_size": 64,  # this equals bs = 128, 128 * 32 = 4096
+    # "with_wandb": True,
 }
 
 # params different between exps
