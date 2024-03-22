@@ -1,7 +1,7 @@
 import sys
 
 import torch.nn as nn
-
+import loralib as lora
 from sample_factory.utils.utils import log
 
 
@@ -56,3 +56,23 @@ def unfreeze_selected(step, cfg, model, models_frozen):
 
             if cfg.freeze_batch_norm:
                 unfreeze_batch_norm(getattr(model, module_name))
+
+
+def lora_replace_linear(module, device, r_lora):
+    """replace all nn.Linear with lora.Linear in the module"""
+    for name, sub_module in module.named_children():
+        if isinstance(sub_module, nn.Linear):
+            new_module = lora.Linear(sub_module.in_features, sub_module.out_features, r = r_lora)
+            device = next(sub_module.parameters()).device
+            new_module.to(device)
+            setattr(module, name, new_module)
+
+def apply_lora(cfg, model, models_lora_processed):
+    """use lora in all modules specified in cfg.modules_lora"""
+    for model_lora, module_list in cfg.modules_lora.items():
+        if not models_lora_processed[model_lora]: 
+            for module_name in module_list:
+                lora_replace_linear(getattr(getattr(model, model_lora), module_name), cfg.device, cfg.r_lora)
+                log.debug(f"Applied LoRA to {model_lora}.{module_name}")
+            lora.mark_only_lora_as_trainable(getattr(model, model_lora))
+            models_lora_processed[model_lora] = True

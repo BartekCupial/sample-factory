@@ -27,7 +27,7 @@ from sf_examples.nethack.datasets.dataset import load_nld_aa_large_dataset
 from sf_examples.nethack.datasets.render import render_screen_image
 from sf_examples.nethack.datasets.roles import Alignment, Race, Role
 from sf_examples.nethack.models.kickstarter import KickStarter
-from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected
+from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected, apply_lora
 
 
 class DatasetLearner(Learner):
@@ -59,6 +59,7 @@ class DatasetLearner(Learner):
         self.kickstarting_loss_func: Optional[Callable] = None
 
         self.models_frozen = dict(zip(self.cfg.freeze.keys(), [False] * len(self.cfg.freeze)))
+        self.models_lora_processed = dict(zip(self.cfg.modules_lora.keys(), [False] * len(self.cfg.modules_lora)))
 
     def init(self) -> InitModelData:
         init_model_data = super().init()
@@ -521,6 +522,12 @@ class DatasetLearner(Learner):
                     unfreeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
                 else:
                     unfreeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
+
+            with timing.add_time("lora"):
+                if isinstance(self.actor_critic, KickStarter):
+                    apply_lora(self.cfg, self.actor_critic.student, self.models_lora_processed)
+                else:
+                    apply_lora(self.cfg, self.actor_critic, self.models_lora_processed)
 
         for epoch in range(self.cfg.num_epochs):
             with timing.add_time("epoch_init"):
