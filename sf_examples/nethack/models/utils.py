@@ -76,3 +76,13 @@ def apply_lora(cfg, model, models_lora_processed):
                 log.debug(f"Applied LoRA to {model_lora}.{module_name}")
             lora.mark_only_lora_as_trainable(getattr(model, model_lora))
             models_lora_processed[model_lora] = True
+
+
+def unfreeze_modules(cfg, model, modules_unfrozen):
+    """Unfreeze all modules specified in cfg.modules_unfreeze"""
+    for model_to_partially_unfreeze, module_list in cfg.modules_unfreeze.items():
+        if not modules_unfrozen[model_to_partially_unfreeze]:
+            for module_name in module_list:
+                unfreeze(getattr(getattr(model, model_to_partially_unfreeze), module_name))
+                log.debug(f"Unfrozen module {model_to_partially_unfreeze}.{module_name}")
+            modules_unfrozen[model_to_partially_unfreeze] = True
