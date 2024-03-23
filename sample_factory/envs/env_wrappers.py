@@ -320,7 +320,6 @@ class FireResetEnv(gym.Wrapper):
             obs, info = self.env.reset(**kwargs)
         return obs, info
 
-
 # wrapper from CleanRL / Stable Baselines
 class EpisodicLifeEnv(gym.Wrapper):
     """
@@ -362,6 +361,22 @@ class EpisodicLifeEnv(gym.Wrapper):
             # no-op step to advance from terminal/lost life state
             obs, _, terminated, truncated, info = self.env.step(0)
         self.lives = self.env.unwrapped.ale.lives()
+        return obs, info
+
+
+class TrueObjectiveEnv(gym.Wrapper):
+
+    def __init__(self, env: gym.Env):
+        gym.Wrapper.__init__(self, env)
+
+    def step(self, action: int) -> GymStepReturn:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info["true_objective"] = reward
+        return obs, reward, terminated, truncated, info
+
+    def reset(self, **kwargs) -> Tuple[np.ndarray, Dict]:
+        obs, info = self.env.reset(**kwargs)
+        info["true_objective"] = 0
         return obs, info
 
 

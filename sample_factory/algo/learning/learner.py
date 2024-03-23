@@ -9,7 +9,6 @@ from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import torch
-from nle import nethack
 from torch import Tensor
 from torch.nn import Module
 

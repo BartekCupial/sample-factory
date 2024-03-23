@@ -34,6 +34,7 @@ class MultiInputEncoder(Encoder):
     def __init__(self, cfg: Config, obs_space: ObsSpace):
         super().__init__(cfg)
         self.obs_keys = list(sorted(obs_space.keys()))  # always the same order
+        print("OBS KEYS", self.obs_keys)
         self.encoders = nn.ModuleDict()
 
         out_size = 0

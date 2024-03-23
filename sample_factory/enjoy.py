@@ -94,6 +94,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     render_action_repeat: int = cfg.env_frameskip // eval_env_frameskip
     cfg.env_frameskip = cfg.eval_env_frameskip = eval_env_frameskip
     log.debug(f"Using frameskip {cfg.env_frameskip} and {render_action_repeat=} for evaluation")
+    assert render_action_repeat == 1
 
     cfg.num_envs = 1
 
@@ -141,6 +142,8 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     finished_episode = [False for _ in range(env.num_agents)]
 
     video_frames = []
+    all_actions = []
+    all_obs = []
     num_episodes = 0
 
     with torch.no_grad():
@@ -167,6 +170,8 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
 
             for _ in range(render_action_repeat):
                 last_render_start = render_frame(cfg, env, video_frames, num_episodes, last_render_start)
+                all_obs += [obs["obs"].cpu().numpy()]
+                all_actions += [actions.item()]
 
                 obs, rew, terminated, truncated, infos = env.step(actions)
                 dones = make_dones(terminated, truncated)
@@ -215,7 +220,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
 
                 # if episode terminated synchronously for all agents, pause a bit before starting a new one
                 if all(dones):
-                    render_frame(cfg, env, video_frames, num_episodes, last_render_start)
+                    # render_frame(cfg, env, video_frames, num_episodes, last_render_start)
                     time.sleep(0.05)
 
                 if all(finished_episode):
@@ -259,7 +264,13 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
             fps = cfg.fps
         else:
             fps = 30
-        generate_replay_video(experiment_dir(cfg=cfg), video_frames, fps, cfg)
+
+        all_actions = np.array(all_actions)
+        all_obs = np.concatenate(all_obs, axis=0)
+        np.savez_compressed(f"{experiment_dir(cfg=cfg)}/{cfg.env}_dataset.npz",
+                            observations=all_obs,
+                            actions=all_actions)
+        # generate_replay_video(experiment_dir(cfg=cfg), video_frames, fps, cfg)
 
     if cfg.push_to_hub:
         generate_model_card(

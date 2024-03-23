@@ -9,6 +9,7 @@ from sample_factory.envs.env_wrappers import (
     MaxAndSkipEnv,
     NoopResetEnv,
     NumpyObsWrapper,
+    TrueObjectiveEnv,
 )
 
 ATARI_W = ATARI_H = 84
@@ -100,6 +101,7 @@ def make_atari_env(env_name, cfg, env_config, render_mode: Optional[str] = None)
 
     # these are chosen to match Stable-Baselines3 and CleanRL implementations as precisely as possible
     env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = TrueObjectiveEnv(env)
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=cfg.env_frameskip)
     env = EpisodicLifeEnv(env)
