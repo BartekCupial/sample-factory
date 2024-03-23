@@ -214,6 +214,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
                             if "episode" in infos[agent_i].keys():
                                 num_episodes += 1
                                 reward_list.append(infos[agent_i]["episode"]["r"])
+                                print(reward_list)
                         else:
                             num_episodes += 1
                             reward_list.append(true_objective)
@@ -283,6 +284,10 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
             cfg.train_script,
         )
         push_to_hf(experiment_dir(cfg=cfg), cfg.hf_repository)
+
+    avg_reward = np.mean(reward_list)
+    with open(f"{experiment_dir(cfg=cfg)}/avg_reward.txt", "w") as f:
+        f.write(f"{avg_reward}\n")
 
     return ExperimentStatus.SUCCESS, sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / sum(
         [len(episode_rewards[i]) for i in range(env.num_agents)]
