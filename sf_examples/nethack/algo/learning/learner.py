@@ -11,7 +11,7 @@ from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution
 from sample_factory.algo.utils.env_info import EnvInfo
-from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STATS_KEY, TRAIN_STATS, memory_stats
+from sample_factory.algo.utils.misc import EPS, LEARNER_ENV_STEPS, POLICY_ID_KEY, STATS_KEY, TRAIN_STATS, memory_stats
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import alloc_trajectory_tensors
@@ -234,7 +234,7 @@ class DatasetLearner(Learner):
 
         return distillation_loss
 
-    def _kickstarting_loss(self, result, valids, num_invalids: int):
+    def _kickstarting_loss(self, result, valids, num_invalids: int, beta):
         # we want to be equivalent to reduction "batchmean",
         # first we will sum div on every single distribution and leave the batch intact
         # after masked_select we will average what is left
@@ -244,6 +244,7 @@ class DatasetLearner(Learner):
             log_target=True,
             reduction="none",
         ).sum(axis=1)
+        kickstarting_loss *= beta
         kickstarting_loss = masked_select(kickstarting_loss, valids, num_invalids)
         kickstarting_loss *= self.cfg.kickstarting_loss_coeff
         kickstarting_loss = kickstarting_loss.mean()
@@ -364,6 +365,66 @@ class DatasetLearner(Learner):
             valids=valids,
         )
 
+    def compute_heuristic_weights(self, P, R, k, ub, lb):
+        """
+        Compute the heuristic alpha(x) and beta(x) weights for a batch of samples.
+
+        Args:
+            P: The generation probabilities P_pi_theta(x) for the batch
+            R: The reward scores R(x) for the batch
+            k: The threshold of times of standard variance
+            ub: The upper bound for alpha(x) and beta(x)
+            lb: The lower bound for alpha(x) and beta(x)
+
+        Returns:
+            alpha: The heuristic alpha(x) weights for the batch
+            beta: The heuristic beta(x) weights for the batch
+        """
+        mu_P, sigma_P = torch.mean(P), torch.std(P)
+        mu_R, sigma_R = torch.mean(R), torch.std(R)
+
+        alpha = torch.ones_like(P)
+        beta = torch.ones_like(P)
+
+        def F_op(mu, sigma):
+            return mu - k * sigma
+
+        def G_op(mu, sigma):
+            return mu + k * sigma
+
+        high_perf_mask = (P >= G_op(mu_P, sigma_P)) & (R >= G_op(mu_R, sigma_R))
+        overfit_mask = (P >= G_op(mu_P, sigma_P)) & (R <= F_op(mu_P, sigma_P))
+        high_var_mask = (P <= F_op(mu_P, sigma_P)) & (R >= G_op(mu_R, sigma_R))
+        noisy_mask = (P <= F_op(mu_P, sigma_P)) & (R <= F_op(mu_P, sigma_P))
+
+        alpha[high_perf_mask] = torch.minimum(
+            torch.ones_like(P[high_perf_mask]) * ub, (P[high_perf_mask] - mu_P) / (sigma_P + EPS)
+        )
+        alpha[overfit_mask] = torch.minimum(
+            torch.ones_like(P[overfit_mask]) * ub, (P[overfit_mask] - mu_P) / (sigma_P + EPS)
+        )
+        alpha[high_var_mask] = torch.minimum(
+            torch.ones_like(P[high_var_mask]) * ub, (1 - P[high_var_mask] - mu_P) / (sigma_P + EPS)
+        )
+        alpha[noisy_mask] = torch.maximum(
+            torch.ones_like(P[noisy_mask]) * lb, 2 + (P[noisy_mask] - mu_P) / (k * (sigma_P + EPS))
+        )
+
+        beta[high_perf_mask] = torch.minimum(
+            torch.ones_like(P[high_perf_mask]) * ub, (R[high_perf_mask] - mu_R) / (k * (sigma_R + EPS))
+        )
+        beta[overfit_mask] = torch.maximum(
+            torch.ones_like(P[overfit_mask]) * lb, 2 + (R[overfit_mask] - mu_R) / (k * (sigma_R + EPS))
+        )
+        beta[high_var_mask] = torch.maximum(
+            torch.ones_like(P[high_var_mask]) * lb, 2 + (1 - R[high_var_mask] - mu_R) / (k * (sigma_R + EPS))
+        )
+        beta[noisy_mask] = torch.maximum(
+            torch.ones_like(P[noisy_mask]) * lb, 2 + (R[noisy_mask] - mu_R) / (k * (sigma_R + EPS))
+        )
+
+        return alpha, beta
+
     def _calculate_losses(
         self,
         mb: AttrDict,
@@ -380,6 +441,14 @@ class DatasetLearner(Learner):
             # we want action distribution (last) of the same shape as mb
             action_distribution = self.actor_critic.action_distribution()
 
+            alpha, beta = self.compute_heuristic_weights(
+                mb["log_prob_actions"],
+                mb["rewards"],
+                self.cfg.threshold,
+                self.cfg.ub,
+                self.cfg.lb,
+            )
+
             with self.timing.add_time("ppo_losses"):
                 ratio = mb_results["ratio"]
                 adv = mb_results["adv"]
@@ -390,7 +459,9 @@ class DatasetLearner(Learner):
                 targets = mb_results["targets"]
 
                 # noinspection PyTypeChecker
-                policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+                policy_loss = self._policy_loss(
+                    ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids, alpha
+                )
                 exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
                 kl_old, kl_loss = self.kl_loss_func(
                     self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
@@ -403,6 +474,7 @@ class DatasetLearner(Learner):
                     mb_results["result"],
                     mb_results["valids"],
                     num_invalids,
+                    beta,
                 )
         else:
             action_distribution = None

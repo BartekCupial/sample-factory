@@ -436,11 +436,12 @@ class Learner(Configurable):
             self.policy_to_load = None
 
     @staticmethod
-    def _policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids: int):
+    def _policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids: int, alpha):
         clipped_ratio = torch.clamp(ratio, clip_ratio_low, clip_ratio_high)
         loss_unclipped = ratio * adv
         loss_clipped = clipped_ratio * adv
         loss = torch.min(loss_unclipped, loss_clipped)
+        loss *= alpha
         loss = masked_select(loss, valids, num_invalids)
         loss = -loss.mean()
 

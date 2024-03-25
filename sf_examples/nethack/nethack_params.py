@@ -76,6 +76,9 @@ def add_extra_params_learner(parser):
     p.add_argument("--dataset_deep", type=str2bool, default=False)
     p.add_argument("--dataset_shuffle", type=str2bool, default=True, help="for debugging purposes")
     p.add_argument("--reset_on_rollout_boundary", type=str2bool, default=False)
+    p.add_argument("--lb", type=float, default=0.5)
+    p.add_argument("--ub", type=float, default=2.5)
+    p.add_argument("--threshold", type=float, default=0.85)
 
 
 def add_extra_params_general(parser):
