@@ -23,11 +23,12 @@ from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import log
+from sf_examples.atari.models.kickstarter import KickStarter
+from sf_examples.atari.models.utils import freeze_selected, unfreeze_selected
 # from sf_examples.nethack.datasets.actions import ACTION_MAPPING
 # from sf_examples.nethack.datasets.dataset import load_nld_aa_large_dataset
 # from sf_examples.nethack.datasets.render import render_screen_image
 # from sf_examples.nethack.datasets.roles import Alignment, Race, Role
-# from sf_examples.nethack.models.kickstarter import KickStarter
 # from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected
 
 
@@ -59,7 +60,7 @@ class DatasetLearner(Learner):
         self.distillation_loss_func: Optional[Callable] = None
         self.kickstarting_loss_func: Optional[Callable] = None
 
-        # self.models_frozen = dict(zip(self.cfg.freeze.keys(), [False] * len(self.cfg.freeze)))
+        self.models_frozen = dict(zip(self.cfg.freeze.keys(), [False] * len(self.cfg.freeze)))
 
     def init(self) -> InitModelData:
         init_model_data = super().init()
@@ -470,18 +471,17 @@ class DatasetLearner(Learner):
 
             assert self.actor_critic.training
 
-            # TODO
-            # with timing.add_time("freeze_model"):
-            #     if isinstance(self.actor_critic, KickStarter):
-            #         freeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
-            #     else:
-            #         freeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
+            with timing.add_time("freeze_model"):
+                if isinstance(self.actor_critic, KickStarter):
+                    freeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
+                else:
+                    freeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
 
-            # with timing.add_time("unfreeze_model"):
-            #     if isinstance(self.actor_critic, KickStarter):
-            #         unfreeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
-            #     else:
-            #         unfreeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
+            with timing.add_time("unfreeze_model"):
+                if isinstance(self.actor_critic, KickStarter):
+                    unfreeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
+                else:
+                    unfreeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
 
         for epoch in range(self.cfg.num_epochs):
             with timing.add_time("epoch_init"):

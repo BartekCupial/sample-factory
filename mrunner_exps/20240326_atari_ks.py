@@ -4,6 +4,7 @@ name = globals()["script"][:-3]
 
 # params for all exps
 config = {
+    "env": "atari_breakout",
     "exp_tags": [name],
 
     "train_for_env_steps": 2_000_000_000,
@@ -24,36 +25,28 @@ config = {
     "wandb_group": "rahid",
     "wandb_tags": [name],
 
-    "use_dataset": True,
-    "dataset_rollout": 32,
-    "dataset_num_workers": 8,
-    "supervised_loss_coeff": 1.0,
-    "behavioral_clone": True,
-    "num_epochs": 1,
-
     "batch_size": 32,
     "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
     "serial_mode": False,
+
+    "use_pretrained_checkpoint": True,
+    "model_path": "/home/maciejwolczyk/breakout_checkpoint/default_experiment/",
+    "teacher_path": "/home/maciejwolczyk/breakout_checkpoint/default_experiment/",
+    "kickstarting_loss_coeff": 1.0,
+    "learning_rate": 1e-4,
+    "value_loss_coeff": 1e-4,
+    "skip_train": 1_000_000,
+    "freeze": {"encoder": 0, "core": 0, "decoder": 0, "action_parameterization": 0},
+    "unfreeze": {"encoder": 2_000_000, "core": 2_000_000, "decoder": 2_000_000, "action_parameterization": 2_000_000} ,
 }
 
-
-atari_games = ["breakout", "beam_rider", "qbert", "montezuma", "upndown"]
-
 # params different between exps
-params_grid = []
-
-for atari_game in atari_games:
-    params_grid += [
-        {
-            "seed": list(range(1)),
-            "dataset_name": [f"/atari_datasets/atari_2B_atari_{atari_game}_1111/atari_{atari_game}_dataset.npz"],
-            "env": [f"atari_{atari_game}"],
-            "learning_rate": [1e-4, 5e-4, 1e-3],
-        }
-    ]
-
-print(params_grid)
+params_grid = [
+    {
+        "seed": list(range(1)),
+    },
+]
 
 experiments_list = create_experiments_helper(
     experiment_name=name,
