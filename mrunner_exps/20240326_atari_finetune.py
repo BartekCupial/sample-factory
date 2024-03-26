@@ -33,19 +33,26 @@ config = {
     "use_pretrained_checkpoint": True,
     "model_path": "/home/maciejwolczyk/breakout_checkpoint/default_experiment/",
     "kickstarting_loss_coeff": 0.0,
-    "learning_rate": 1e-4,
-    "value_loss_coeff": 1e-4,
-    "skip_train": 1_000_000,
+    "skip_train": 5_000_000,
     "freeze": {"encoder": 0, "core": 0, "decoder": 0, "action_parameterization": 0},
-    "unfreeze": {"encoder": 2_000_000, "core": 2_000_000, "decoder": 2_000_000, "action_parameterization": 2_000_000} ,
+    "unfreeze": {"encoder": 10_000_000, "core": 10_000_000, "decoder": 10_000_000, "action_parameterization": 10_000_000} ,
 }
 
+atari_games = ["breakout", "qbert", "montezuma", "upndown"]
 # params different between exps
-params_grid = [
-    {
-        "seed": list(range(1)),
-    },
-]
+
+params_grid = []
+
+for atari_game in atari_games:
+    params_grid += [
+        {
+            "seed": list(range(1)),
+            "learning_rate": [1e-4, 1e-3],
+            "value_loss_coeff": [1e-2, 1e-1],
+            "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
+            "env": [f"atari_{atari_game}"],
+        },
+    ]
 
 experiments_list = create_experiments_helper(
     experiment_name=name,
