@@ -150,7 +150,7 @@ class ActorCriticSharedWeights(ActorCritic):
 
         decoder_out_size: int = self.decoder.get_out_size()
 
-        self.critic_linear = nn.Linear(decoder_out_size, 1)
+        self.critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
 
         self.apply(self.initialize_weights)
@@ -165,7 +165,7 @@ class ActorCriticSharedWeights(ActorCritic):
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
         decoder_output = self.decoder(core_output)
-        values = self.critic_linear(decoder_output).squeeze()
+        values = self.critic(decoder_output).squeeze()
 
         result = TensorDict(values=values)
         if values_only:
@@ -212,7 +212,7 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.critic_decoder = model_factory.make_model_decoder_func(cfg, self.critic_core.get_out_size())
         self.decoders = [self.actor_decoder, self.critic_decoder]
 
-        self.critic_linear = nn.Linear(self.critic_decoder.get_out_size(), 1)
+        self.critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
 
         self.apply(self.initialize_weights)
@@ -284,7 +284,7 @@ class ActorCriticSeparateWeights(ActorCritic):
 
         # second core output corresponds to the critic
         critic_decoder_output = self.critic_decoder(core_outputs[1])
-        values = self.critic_linear(critic_decoder_output).squeeze()
+        values = self.critic(critic_decoder_output).squeeze()
 
         result = TensorDict(values=values)
         if values_only:

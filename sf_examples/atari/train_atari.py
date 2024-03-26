@@ -12,18 +12,17 @@ from sample_factory.model.actor_critic import ActorCritic, default_make_actor_cr
 from sample_factory.model.encoder import Encoder
 from sample_factory.train import run_rl
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
-from sample_factory.utils.utils import log
+from sample_factory.utils.utils import log, str2bool
+from sf_examples.atari.algo.learning.learner import DatasetLearner
 from sf_examples.atari.atari_params import atari_override_defaults
 from sf_examples.atari.atari_utils import ATARI_ENVS, make_atari_env
-from sf_examples.atari.algo.learning.learner import DatasetLearner
 from sf_examples.atari.models.kickstarter import KickStarter
-from sample_factory.algo.utils.context import sf_global_context
-from sample_factory.utils.utils import str2bool
 
 
 def register_atari_envs():
     for env in ATARI_ENVS:
         register_env(env.name, make_atari_env)
+
 
 def register_atari_components():
     sf_global_context().learner_cls = DatasetLearner
@@ -57,6 +56,7 @@ def add_extra_params_learner(parser):
     p.add_argument("--dataset_num_workers", type=int, default=8)
     p.add_argument("--dataset_shuffle", type=str2bool, default=True, help="for debugging purposes")
     p.add_argument("--reset_on_rollout_boundary", type=str2bool, default=False)
+
 
 def make_atari_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
     create_model = default_make_actor_critic_func
@@ -111,6 +111,7 @@ def make_atari_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: Acti
 
     return model
 
+
 def load_pretrained_checkpoint(model, checkpoint_dir: str, checkpoint_kind: str, normalize_returns: bool = True):
     name_prefix = dict(latest="checkpoint", best="best")[checkpoint_kind]
     checkpoints = Learner.get_checkpoints(join(checkpoint_dir, "checkpoint_p0"), f"{name_prefix}_*")
@@ -132,8 +133,13 @@ def load_pretrained_checkpoint(model, checkpoint_dir: str, checkpoint_kind: str,
         del checkpoint_dict["model"]["returns_normalizer.running_mean"]
         del checkpoint_dict["model"]["returns_normalizer.running_var"]
         del checkpoint_dict["model"]["returns_normalizer.count"]
+    else:
+        checkpoint_dict["model"]["returns_normalizer.running_mean"][:] = 0
+        checkpoint_dict["model"]["returns_normalizer.running_var"][:] = 1
+        checkpoint_dict["model"]["returns_normalizer.count"][:] = 1
 
-    model.load_state_dict(checkpoint_dict["model"])
+    # TODO: handle loading linear critic
+    model.load_state_dict(checkpoint_dict["model"], strict=False)
 
 
 def load_pretrained_checkpoint_from_shared_weights(
@@ -157,14 +163,14 @@ def load_pretrained_checkpoint_from_shared_weights(
     tmp_model.returns_normalizer = copy.deepcopy(model_shared.returns_normalizer)
     tmp_model.actor_encoder = copy.deepcopy(model_shared.encoder)
     tmp_model.actor_core = copy.deepcopy(model_shared.core)
-    tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
-    tmp_model.critic_core = copy.deepcopy(model_shared.core)
     tmp_model.actor_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
     tmp_model.action_parameterization = copy.deepcopy(model_shared.action_parameterization)
+    # tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
+    # tmp_model.critic_core = copy.deepcopy(model_shared.core)
+    # tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
+    # tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
 
-    model.load_state_dict(tmp_model.state_dict())
+    model.load_state_dict(tmp_model.state_dict(), strict=False)
 
 
 def add_extra_params_general(parser):

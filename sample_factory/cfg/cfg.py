@@ -1,3 +1,4 @@
+import ast
 import multiprocessing
 import os
 from argparse import ArgumentParser
@@ -525,6 +526,12 @@ def add_model_args(p: ArgumentParser):
         help="In case of MLP encoder, sizes of layers to use. This is ignored if observations are images. "
         "To use this parameter from command line, omit the = sign and separate values with spaces, e.g. "
         "--encoder_mlp_layers 256 128 64",
+    )
+    p.add_argument(
+        "--critic_mlp_layers",
+        default=[],
+        type=ast.literal_eval,
+        help="Optional critic MLP layers after the policy core. If empty (default) critic is a linear function.",
     )
 
     # policy with image observations - convolutional encoder options
