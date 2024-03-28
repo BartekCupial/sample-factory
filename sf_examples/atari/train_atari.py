@@ -67,10 +67,14 @@ def make_atari_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: Acti
     if use_distillation_loss or use_kickstarting_loss:
         student = create_model(cfg, obs_space, action_space)
         if cfg.use_pretrained_checkpoint:
-            load_pretrained_checkpoint(
-                student, cfg.model_path, cfg.load_checkpoint_kind, normalize_returns=cfg.normalize_returns
-            )
-            log.debug("Loading model from pretrained checkpoint")
+            if not cfg.actor_critic_share_weights:
+                load_pretrained_checkpoint_from_shared_weights(
+                    student, cfg, cfg.model_path, cfg.load_checkpoint_kind, create_model, obs_space, action_space
+                )
+            else:
+                load_pretrained_checkpoint(
+                    student, cfg.model_path, cfg.load_checkpoint_kind, normalize_returns=cfg.normalize_returns
+                )
 
         # because there can be some missing parameters in the teacher config
         # we will get the default values and override the default_cfg with what teacher had in the config
@@ -160,6 +164,8 @@ def load_pretrained_checkpoint_from_shared_weights(
     cfg.actor_critic_share_weights = False
     tmp_model: ActorCritic = create_model(cfg, obs_space, action_space)
 
+
+    tmp_model.obs_normalizer = copy.deepcopy(model_shared.obs_normalizer)
     tmp_model.returns_normalizer = copy.deepcopy(model_shared.returns_normalizer)
     tmp_model.actor_encoder = copy.deepcopy(model_shared.encoder)
     tmp_model.actor_core = copy.deepcopy(model_shared.core)

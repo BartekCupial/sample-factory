@@ -38,6 +38,7 @@ config = {
         "action_parameterization": 10_000_000,
     },
     "actor_critic_share_weights": False,
+    "load_checkpoint_kind": "best",
 }
 
 # params different between exps
