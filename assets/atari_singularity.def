@@ -53,6 +53,7 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
     # install sample factory
     cd /dungeons/
     pip install .[dev,atari,mrunner]
+    pip install opencv-python-headless
 
     chmod a+rw -R /opt/conda/bin/python
 

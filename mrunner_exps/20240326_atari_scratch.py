@@ -24,24 +24,11 @@ config = {
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
     "serial_mode": False,
-    "use_pretrained_checkpoint": True,
-    # "model_path": "/home/maciejwolczyk/breakout_checkpoint/default_experiment/",
-    "model_path": "train_dir/breakout/default_experiment",
-    # "teacher_path": "/home/maciejwolczyk/breakout_checkpoint/default_experiment/",
-    "teacher_path": "train_dir/breakout/default_experiment",
-    "skip_train": 5_000_000,
-    "freeze": {"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0},
-    "unfreeze": {
-        "actor_encoder": 10_000_000,
-        "actor_core": 10_000_000,
-        "actor_decoder": 10_000_000,
-        "action_parameterization": 10_000_000,
-    },
+    "kickstarting_loss_coeff": 0.0,
     "actor_critic_share_weights": False,
     "device": "cpu",
 }
 
-# params different between exps
 atari_games = ["breakout", "qbert", "montezuma", "upndown"]
 # params different between exps
 
@@ -54,10 +41,7 @@ for atari_game in atari_games:
             "learning_rate": [1e-4, 1e-3],
             # "value_loss_coeff": [1e-2, 1e-1],
             "reward_scale": [1e-2, 1e-1],
-            "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
-            "teacher_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
             "env": [f"atari_{atari_game}"],
-            "kickstarting_loss_coeff": [1.0, 0.5, 0.1],
         },
     ]
 

@@ -37,6 +37,7 @@ config = {
         "action_parameterization": 10_000_000,
     },
     "actor_critic_share_weights": False,
+    "device": "cpu",
 }
 
 atari_games = ["breakout", "qbert", "montezuma", "upndown"]
