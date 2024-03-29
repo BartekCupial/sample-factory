@@ -59,6 +59,7 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
     # install sample factory
     pip install .[dev,nethack,mrunner]
+    pip install loralib
 
     # Test NLE.
     python -c 'import gym; import nle; env = gym.make("NetHackScore-v0"); env.reset()'
