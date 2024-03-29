@@ -4,32 +4,43 @@ name = globals()["script"][:-3]
 
 # params for all exps
 config = {
+    # "device": "cpu",
+    "restart_behavior": "overwrite",
     "env": "challenge",
-    "exp_tags": [name],
-    "exp_point": "monk-APPO",
-    "train_for_env_steps": 1_000_000,
-    "group": "monk-APPO",
+    "train_for_env_steps": 2_000_000_000,
     "character": "mon-hum-neu-mal",
-    "num_workers": 16,
-    "num_envs_per_worker": 16,
+    "num_workers": 32,
+    # "num_workers": 2,
+    "num_envs_per_worker": 2,
     "worker_num_splits": 2,
     "rollout": 32,
-    "batch_size": 1024,  # this equals bs = 128, 128 * 32 = 4096
+    # "batch_size": 128,
+    "batch_size": 4096,
     "async_rl": True,
     "serial_mode": False,
     "use_prev_action": True,
+    "model": "ScaledNet",
+    "num_batches_per_epoch": 2,
+    "use_resnet": True,
+    "rnn_size": 512,
+    "h_dim": 512,
+    "gamma": 0.999,
+    "heartbeat_interval": 600,
+    "heartbeat_reporting_interval": 1200,
+    "learning_rate": 0.0001,
     "wandb_user": "bartosz-m-smoczynski",
     "wandb_project": "sf2_nethack",
     "wandb_group": "barsmo-team-org",
     "with_wandb": True,
 }
 
-# params different between exps
 params_grid = [
     {
-        "seed": list(range(1)),
-    },
+        # "seed": list(range(1)),
+        "seed": list(range(3)),
+    }
 ]
+
 
 experiments_list = create_experiments_helper(
     experiment_name=name,
