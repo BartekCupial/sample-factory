@@ -224,7 +224,14 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        actor_params = map(
+            lambda x: x[1], filter(lambda x: not x[0].startswith("critic"), self.actor_critic.named_parameters())
+        )
+        critic_params = map(
+            lambda x: x[1], filter(lambda x: x[0].startswith("critic"), self.actor_critic.named_parameters())
+        )
+        if self.cfg.critic_learning_rate is None:
+            self.cfg.critic_learning_rate = self.cfg.learning_rate
 
         optimizer_cls = dict(
             sgd=torch.optim.SGD,
@@ -250,7 +257,10 @@ class Learner(Configurable):
         if self.cfg.optimizer in ["sgd", "rmsprop"]:
             optimizer_kwargs["momentum"] = self.cfg.momentum
 
-        self.optimizer = optimizer_cls(params, **optimizer_kwargs)
+        self.optimizer = optimizer_cls(
+            [{"params": actor_params}, {"params": critic_params, "lr": self.cfg.critic_learning_rate}],
+            **optimizer_kwargs,
+        )
 
         self.load_from_checkpoint(self.policy_id)
         self.param_server.init(self.actor_critic, self.train_step, self.device)

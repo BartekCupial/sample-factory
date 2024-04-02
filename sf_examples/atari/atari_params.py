@@ -32,7 +32,6 @@ def atari_override_defaults(_env, parser):
         value_loss_coeff=0.5,
         exploration_loss="entropy",
         learning_rate=0.00025,
-        lr_schedule="linear_decay",
         shuffle_minibatches=False,
         gae_lambda=0.95,
         batched_sampling=False,
