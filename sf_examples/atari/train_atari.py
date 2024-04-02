@@ -164,16 +164,17 @@ def load_pretrained_checkpoint_from_shared_weights(
     cfg.actor_critic_share_weights = False
     tmp_model: ActorCritic = create_model(cfg, obs_space, action_space)
 
-
     tmp_model.obs_normalizer = copy.deepcopy(model_shared.obs_normalizer)
     tmp_model.returns_normalizer = copy.deepcopy(model_shared.returns_normalizer)
     tmp_model.actor_encoder = copy.deepcopy(model_shared.encoder)
     tmp_model.actor_core = copy.deepcopy(model_shared.core)
     tmp_model.actor_decoder = copy.deepcopy(model_shared.decoder)
     tmp_model.action_parameterization = copy.deepcopy(model_shared.action_parameterization)
-    # tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
-    # tmp_model.critic_core = copy.deepcopy(model_shared.core)
-    # tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
+
+    if cfg.init_critic_from_actor:
+        tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
+        tmp_model.critic_core = copy.deepcopy(model_shared.core)
+        tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
     # tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
 
     model.load_state_dict(tmp_model.state_dict(), strict=False)
@@ -215,6 +216,7 @@ def add_extra_params_general(parser):
     p.add_argument("--skip_train", type=int, default=-1)
     p.add_argument("--target_batch_size", type=int, default=128)
     p.add_argument("--optim_step_every_ith", type=int, default=1)
+    p.add_argument("--init_critic_from_actor", type=str2bool, default=True)
 
 
 def main():  # pragma: no cover
