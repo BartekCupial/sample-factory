@@ -217,6 +217,7 @@ def add_extra_params_general(parser):
     p.add_argument("--target_batch_size", type=int, default=128)
     p.add_argument("--optim_step_every_ith", type=int, default=1)
     p.add_argument("--init_critic_from_actor", type=str2bool, default=True)
+    p.add_argument("--critic_layer_norm", type=str2bool, default=False)
 
 
 def main():  # pragma: no cover

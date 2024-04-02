@@ -23,7 +23,7 @@ class MlpCritic(Critic):
         self.critic_out_size = 1
         critic_layers: List[int] = cfg.critic_mlp_layers
         activation = nonlinearity(cfg)
-        self.mlp = create_mlp(critic_layers, critic_input_size, activation)
+        self.mlp = create_mlp(critic_layers, critic_input_size, activation, use_layer_norm=cfg.critic_layer_norm)
         if len(critic_layers) > 0:
             self.mlp = torch.jit.script(self.mlp)
 
