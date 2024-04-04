@@ -383,30 +383,34 @@ class InventoryEncoder(nn.Module):
         self.out_dim = self.INVENTORY_SIZE * embedding_dim
 
         self.glyphs_embedding = nn.Embedding(
-            nethack.NUM_OBJECTS + 1,
+            nethack.MAX_GLYPH + 1,
             embedding_dim,
-            padding_idx=nethack.NUM_OBJECTS,
+            # padding_idx=nethack.MAX_GLYPH,
         )
-        self.keys_embedding = nn.Embedding(96, embedding_dim, padding_idx=0)
+        self.keys_embedding = nn.Embedding(
+            256,
+            embedding_dim,
+            # padding_idx=0.
+        )
         self.classes_embedding = nn.Embedding(
             nethack.MAXOCLASSES + 1,
             embedding_dim,
-            padding_idx=nethack.MAXOCLASSES,
+            # padding_idx=nethack.MAXOCLASSES,
         )
 
     def forward(self, inv_glyps, inv_keys, inv_oclasses):
-        normalized_glyph_ids = inv_glyps - nethack.GLYPH_OBJ_OFF
-        normalized_glyph_ids = torch.where(
-            inv_glyps < nethack.MAX_GLYPH, inv_glyps - nethack.GLYPH_OBJ_OFF, nethack.NUM_OBJECTS
-        )
-        normalized_inv_keys = torch.where(inv_keys > 0, inv_keys - 32, 0)
+        # normalized_glyph_ids = inv_glyps - nethack.GLYPH_OBJ_OFF
+        # normalized_glyph_ids = torch.where(
+        #     inv_glyps < nethack.MAX_GLYPH, inv_glyps - nethack.GLYPH_OBJ_OFF, nethack.NUM_OBJECTS
+        # )
+        # normalized_inv_keys = torch.where(inv_keys > 0, inv_keys - 32, 0)
 
-        self._check_embedding_indices(normalized_glyph_ids, self.glyphs_embedding)
-        self._check_embedding_indices(normalized_inv_keys, self.keys_embedding)
-        self._check_embedding_indices(inv_oclasses, self.classes_embedding)
+        # self._check_embedding_indices(normalized_glyph_ids, self.glyphs_embedding)
+        # self._check_embedding_indices(normalized_inv_keys, self.keys_embedding)
+        # self._check_embedding_indices(inv_oclasses, self.classes_embedding)
 
-        embedded_glyphs = selectt(self.glyphs_embedding, normalized_glyph_ids.long(), True)
-        embedded_inv_keys = selectt(self.keys_embedding, normalized_inv_keys.long(), True)
+        embedded_glyphs = selectt(self.glyphs_embedding, inv_glyps.long(), True)
+        embedded_inv_keys = selectt(self.keys_embedding, inv_keys.long(), True)
         embedded_classes = selectt(self.classes_embedding, inv_oclasses.long(), True)
 
         encoding = embedded_glyphs + embedded_inv_keys + embedded_classes
