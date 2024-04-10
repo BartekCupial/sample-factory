@@ -61,6 +61,7 @@ def add_extra_params_learner(parser):
     # TODO: add help
     p = parser
     p.add_argument("--use_dataset", type=str2bool, default=False)
+    p.add_argument("--calc_accuracy", type=str2bool, default=False)
     p.add_argument("--behavioral_clone", type=str2bool, default=False)
     p.add_argument("--data_path", type=str, default="/nle/nld-aa/nle_data")
     p.add_argument("--db_path", type=str, default="/ttyrecs/ttyrecs.db")

@@ -139,7 +139,7 @@ class DatasetLearner(Learner):
         ), "only one regularization loss allowed at the time"
 
         assert (
-            use_supervised_loss or use_distillation_loss
+            use_supervised_loss or use_distillation_loss or self.cfg.calc_accuracy
         ) == self.cfg.use_dataset, (
             "If either 'use_supervised_loss' or 'use_distillation_loss' is true, then 'use_dataset' must also be true."
         )
@@ -147,6 +147,7 @@ class DatasetLearner(Learner):
         self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
         self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
         self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
+        self.calc_accuracy_func = self._calc_accuracy if self.cfg.calc_accuracy else lambda *_: 0.0
 
         return init_model_data
 
@@ -205,6 +206,16 @@ class DatasetLearner(Learner):
         model_outputs = stack_tensordicts(model_outputs, dim=1)
 
         return model_outputs
+
+    def _calc_accuracy(self, mb_results, mb, num_invalids: int):
+        outputs = mb_results["action_logits"].flatten(0, 1)
+        targets = mb["actions"].flatten(0, 1).long()
+
+        accuracy = (outputs.argmax(dim=1) == targets).float()
+        # accuracy = masked_select(accuracy, valids, num_invalids)
+        accuracy = accuracy.mean()
+
+        return accuracy
 
     def _supervised_loss(self, mb_results, mb, num_invalids: int):
         outputs = mb_results["action_logits"].flatten(0, 1)
@@ -425,6 +436,13 @@ class DatasetLearner(Learner):
                 dataset_mb_results = None
                 dataset_num_invalids = 0
 
+        with self.timing.add_time("calc_accuracy"):
+            accuracy = self.calc_accuracy_func(
+                dataset_mb_results,
+                dataset_mb,
+                dataset_num_invalids,
+            )
+
         with self.timing.add_time("supervised_loss"):
             supervised_loss = self.supervised_loss_func(
                 dataset_mb_results,
@@ -456,6 +474,7 @@ class DatasetLearner(Learner):
             supervised_loss=to_scalar(supervised_loss),
             distillation_loss=to_scalar(distillation_loss),
             kickstarting_loss=to_scalar(kickstarting_loss),
+            accuracy=to_scalar(accuracy),
         )
 
         return (
