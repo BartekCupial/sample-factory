@@ -49,6 +49,7 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
     conda install -yq cmake flex bison lit
     conda install -yq pybind11 -c conda-forge
     conda install -yq pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+    pip install matplotlib
 
     # install sample factory
     cd /dungeons/
