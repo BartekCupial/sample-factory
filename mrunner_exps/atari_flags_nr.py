@@ -61,26 +61,6 @@ for atari_game in atari_games:
                     }
                 ],
             },
-            {
-                "seed": list(range(3)),
-                "learning_rate": [learning_rate],
-                "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
-                "env": [f"atari_{atari_game}"],
-                "actor_critic_share_weights": [True],
-                "critic_mlp_layers": [[512, 512], [512], []],
-                "critic_layer_norm": [True, False],
- 		"normalize_returns": [True, False],
-                "critic_learning_rate": [learning_rate * 5],
-                "freeze": [{"encoder": 0, "core": 0, "decoder": 0, "action_parameterization": 0}],
-                "unfreeze": [
-                    {
-                        "encoder": 10_000_000,
-                        "core": 10_000_000,
-                        "decoder": 10_000_000,
-                        "action_parameterization": 10_000_000,
-                    }
-                ],
-            },
         ]
 
 experiments_list = create_experiments_helper(
