@@ -6,7 +6,7 @@ name = globals()["script"][:-3]
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
-    "train_for_env_steps": 100_000_000,
+    "train_for_env_steps": 10_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,
@@ -18,7 +18,7 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "flags exp_loss normalize_returns gae_lambda ",
+    "wandb_group": "flags debug remote",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -49,17 +49,17 @@ for atari_game in atari_games:
                 "init_critic_from_actor": [True],
                 "critic_mlp_layers": [[512, 512]],
                 "critic_layer_norm": [True],
-		"exploration_loss_coeff": [0, 0.003],
+		"exploration_loss_coeff": [0.003],
  		"normalize_returns": [True],
 		"gae_lambda": [0.9],
                 "critic_learning_rate": [learning_rate * 5],
                 "freeze": [{"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0}],
                 "unfreeze": [
                     {
-                        "actor_encoder": 10_000_000,
-                        "actor_core": 10_000_000,
-                        "actor_decoder": 10_000_000,
-                        "action_parameterization": 10_000_000,
+                        "actor_encoder": 1_000_000,
+                        "actor_core": 1_000_000,
+                        "actor_decoder": 1_000_000,
+                        "action_parameterization": 1_000_000,
                     }
                 ],
             },
