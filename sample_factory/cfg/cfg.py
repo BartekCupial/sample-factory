@@ -606,6 +606,12 @@ def add_model_args(p: ArgumentParser):
         help="Size of the nanogpt d_model",
     )
     p.add_argument(
+        "--nanogpt_block_size",
+        default=64,
+        type=int,
+        help="Size of the nanogpt d_model",
+    )
+    p.add_argument(
         "--nanogpt_n_head",
         default=8,
         type=int,
@@ -626,6 +632,11 @@ def add_model_args(p: ArgumentParser):
         default="table",
         type=str,
         choices=["table", "sine", "rope", "linear"],
+    )
+    p.add_argument(
+        "--nanogpt_constant_context",
+        default=True,
+        type=str2bool,
     )
     p.add_argument("--rnn_num_layers", default=1, type=int, help="Number of RNN layers to use if use_rnn is True")
 

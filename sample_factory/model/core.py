@@ -52,7 +52,6 @@ class CustomMamba(nn.Module):
     def forward(self, x, rnn_states):
         # states -> [num_layers, batch_size, d_state]
 
-
         # Handle rnn_states
         inference_params = InferenceParams(max_seqlen=3,
                                            max_batch_size=rnn_states.shape[1],
@@ -147,10 +146,11 @@ class ModelCoreRNN(ModelCore):
                 d_model=cfg.nanogpt_model_size,
                 n_head=cfg.nanogpt_n_head,
                 dropout=cfg.nanogpt_dropout,
-                # TODO: have a separate parameter for block size
-                block_size=cfg.rollout,
+                block_size=cfg.nanogpt_block_size,
                 embedding_type=cfg.nanogpt_embedding_type,
                 relative_timesteps=cfg.nanogpt_relative_timesteps,
+                context_len=cfg.rollout,
+                constant_context=cfg.nanogpt_constant_context,
 
             )
             self.core = GPT(GPT_cfg)
@@ -163,7 +163,6 @@ class ModelCoreRNN(ModelCore):
         self.rnn_num_layers = cfg.rnn_num_layers
 
     def forward(self, head_output, rnn_states):
-        # TODO: why this worked without batch_first=True?
         is_seq = not torch.is_tensor(head_output) or head_output.ndim == 3
 
         rnn_states = rnn_states * self.cfg.decay_hidden_states

@@ -19,7 +19,7 @@ def get_rnn_size(cfg):
     elif cfg.rnn_type == "mamba":
         size = (cfg.rnn_num_layers * cfg.mamba_model_size * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
     elif cfg.rnn_type == "nanogpt":
-        size = cfg.rollout * (cfg.nanogpt_model_size + 2)
+        size = cfg.nanogpt_block_size * (cfg.nanogpt_model_size + 2)
 
     if not cfg.actor_critic_share_weights:
         # actor and critic need separate states

@@ -189,6 +189,12 @@ class DatasetLearner(Learner):
         model_outputs = []
         seq_len = mb["actions"].shape[1]
 
+        # Zero out history for consistency with the batch version
+        if self.cfg.rnn_type == "nanogpt":
+            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size, self.cfg.nanogpt_model_size + 2).clone()
+            rnn_state[:, :self.cfg.rollout] = 0.
+            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size * (self.cfg.nanogpt_model_size + 2))
+
         for i in range(seq_len):
             # we split the forward since we want to use teacher from kickstarter
             head_outputs = self.actor_critic.forward_head(mb[:, i])
@@ -202,15 +208,12 @@ class DatasetLearner(Learner):
             rnn_state = new_rnn_state * not_done
             model_outputs.append(outputs)
 
-        # update rnn_states for next iteration
-        self.rnn_states[self.prev_idx] = rnn_state.detach()
-
         # Dict[key, Tensor: [batch_size, seq_len, ...]]
         model_outputs = stack_tensordicts(model_outputs, dim=1)
 
         valids = torch.ones_like(mb["done"]).bool()
 
-        return model_outputs, valids
+        return model_outputs, valids, rnn_state.detach()
 
     def _calculate_dataset_outputs_batch(self, mb: TensorDict):
         rnn_state = self.rnn_states[self.prev_idx]
@@ -252,10 +255,7 @@ class DatasetLearner(Learner):
         # TODO: this is imperfect. The RNN state would not be non-zero.
         new_rnn_state = new_rnn_state * valids[:, -1].unsqueeze(-1).float()
 
-        # update rnn_states for next iteration
-        self.rnn_states[self.prev_idx] = new_rnn_state.detach()
-
-        return model_outputs, valids
+        return model_outputs, valids, new_rnn_state.detach() 
 
     def _supervised_loss(self, mb_results, mb, valids, num_invalids: int):
         outputs = mb_results["action_logits"].flatten(0, 1)
@@ -470,10 +470,14 @@ class DatasetLearner(Learner):
         with self.timing.add_time("prepare_dataset_batch"):
             if self.cfg.use_dataset:
                 dataset_mb = self._get_dataset_minibatch()
+                self.actor_critic.eval()
                 if self.cfg.process_seq_in_batch_mode:
-                    dataset_mb_results, valids = self._calculate_dataset_outputs_batch(dataset_mb)
+                    dataset_mb_results, valids, new_rnn_state = self._calculate_dataset_outputs_batch(dataset_mb)
                 else:
-                    dataset_mb_results, valids = self._calculate_dataset_outputs_seq(dataset_mb)
+                    dataset_mb_results, valids, new_rnn_state = self._calculate_dataset_outputs_seq(dataset_mb)
+
+                # update rnn_states for next iteration
+                self.rnn_states[self.prev_idx] = new_rnn_state
                 dataset_num_invalids = torch.numel(valids) - valids.sum()
             else:
                 dataset_mb = None

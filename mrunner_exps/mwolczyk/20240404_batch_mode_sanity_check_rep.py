@@ -75,10 +75,10 @@ base_params_grid = [
 # to batch size treated as num samples
 params_grid = []
 for grid in base_params_grid:
-    for rollout in [32]:
+    for rollout in [16]:
         new_grid = grid.copy()
         new_grid["rollout"] = [rollout]
-        new_grid["nanogpt_block_size"] = [rollout]
+        new_grid["nanogpt_block_size"] = [rollout * 2]
         new_grid["dataset_rollout"] = [rollout]
         new_grid["dataset_batch_size"] = [config["dataset_batch_size"] * rollout]
         new_grid["batch_size"] = [config["batch_size"] * rollout]

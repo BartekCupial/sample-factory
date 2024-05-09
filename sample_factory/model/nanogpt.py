@@ -84,10 +84,16 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        self.context_len = config.context_len
 
         bias = torch.tril(torch.ones(config.block_size, config.block_size))
+        if config.constant_context:
+            constant_context_bias = torch.triu(torch.ones(config.block_size, config.block_size),
+                                               diagonal=-config.context_len + 1)
+            bias = bias * constant_context_bias
         bias = bias.view(1, 1, config.block_size, config.block_size)
         self.register_buffer("bias", bias)
+
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -190,8 +196,10 @@ class GPTConfig:
     d_model: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    context_len: int = 32
     embedding_type: str = "table"  # table, linear, rope, sine
     relative_timesteps: bool = True  # use absolute timestep idx or relative (t=0 is start of the trajectory vs t=0 is the start of the chunk)
+    constant_context: bool = True
 
 class GPT(nn.Module):
 
@@ -271,6 +279,7 @@ class GPT(nn.Module):
                               device=context_mask.device, dtype=context_mask.dtype)
         context_mask = torch.cat([context_mask, ones_row], dim=-1)
 
+
         # create new timesteps for the new tokens
         new_timesteps = torch.arange(new_seqlen, dtype=torch.float, device=device).view(1, -1) + 1
         new_timesteps = new_timesteps + context_timesteps[:, -1].view(-1, 1)
@@ -307,10 +316,10 @@ class GPT(nn.Module):
             x = pack_padded_sequence(x, lens, batch_first=False, enforce_sorted=False)
         return x, context
 
-    def _get_positional_embedding(self, context, context_timesteps):
+    def _get_positional_embedding(self, context, context_mask, context_timesteps):
         if self.config.relative_timesteps:
-            timesteps = torch.arange(self.config.block_size, dtype=torch.float, device=context.device)  # [seqlen]
-            timesteps = timesteps.view(1, -1).repeat(context_timesteps.shape[0], 1)  # [bs, seqlen]
+            # TODO: this won't work if we have multiple sequences in the same batch
+            timesteps = context_mask.cumsum(-1)
         else:
             timesteps = context_timesteps  # [bs, seqlen]
 
@@ -332,15 +341,12 @@ class GPT(nn.Module):
         old_batch_size, old_seqlen, _ = context.size()
 
         assert old_batch_size == new_batch_size, f"Batch size mismatch: {old_batch_size} != {new_batch_size}"
-
-        
-
         # forward the GPT model itself
         x = self.transformer.input_projection(x)  # shape (b, t, d_model)
 
         context = torch.cat((context, x), dim=1)
 
-        pos_emb = self._get_positional_embedding(context, context_timesteps)
+        pos_emb = self._get_positional_embedding(context, context_mask, context_timesteps)
 
         # Reshape the context mask to fit the attention layers
         context_mask_2d = (context_mask.unsqueeze(2) * context_mask.unsqueeze(1)).unsqueeze(1)

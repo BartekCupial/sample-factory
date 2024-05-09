@@ -37,20 +37,20 @@ config = {
     "restart_behavior": "overwrite",
 
     # Athena
-    # "db_path": "/ttyrecs/ttyrecs.db",
-    # "dataset_name": "autoascend",
-    # "batch_size": 32,
-    # "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
-    # "with_wandb": True,
-    # "serial_mode": False,
+    "db_path": "/ttyrecs/ttyrecs.db",
+    "dataset_name": "autoascend",
+    "batch_size": 32,
+    "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
+    "with_wandb": True,
+    "serial_mode": False
 
     # Local
-    "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
-    "dataset_name": "nld-aa-taster-v1",
-    "batch_size": 4,
-    "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
-    "serial_mode": True,
+    # "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
+    # "dataset_name": "nld-aa-taster-v1",
+    # "batch_size": 4,
+    # "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
+    # "with_wandb": False,
+    # "serial_mode": True,
 }
 
 # params different between exps
@@ -59,14 +59,14 @@ base_params_grid = [
         "seed": list(range(1)),
         "rnn_type": ["nanogpt"],
         "rnn_size": [512],
-        "learning_rate": [5e-4],
+        "learning_rate": [5e-5, 1e-4, 5e-4],
         "nanogpt_model_size": [256],
         "rnn_num_layers": [3],
         "nanogpt_n_head": [8],
         "nanogpt_dropout": [0.],
-        "process_seq_in_batch_mode": [True, False],
-        "nanogpt_embedding_type": ["linear", "sine"],
-        "nanogpt_relative_timesteps": [True, False],
+        "process_seq_in_batch_mode": [True],
+        "nanogpt_embedding_type": ["sine"],
+        "nanogpt_relative_timesteps": [True],
     },
 ]
 
@@ -75,10 +75,10 @@ base_params_grid = [
 # to batch size treated as num samples
 params_grid = []
 for grid in base_params_grid:
-    for rollout in [32]:
+    for rollout in [16]:
         new_grid = grid.copy()
         new_grid["rollout"] = [rollout]
-        new_grid["nanogpt_block_size"] = [rollout]
+        new_grid["nanogpt_block_size"] = [2 * rollout]
         new_grid["dataset_rollout"] = [rollout]
         new_grid["dataset_batch_size"] = [config["dataset_batch_size"] * rollout]
         new_grid["batch_size"] = [config["batch_size"] * rollout]
