@@ -27,7 +27,7 @@ config = {
     "use_pretrained_checkpoint": True,
     "kickstarting_loss_coeff": 0.0,
     "skip_train": 5_000_000,
-    "device": "cpu",
+    "device": "gpu",
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
 }

@@ -3,7 +3,6 @@ from mrunner.helpers.specification_helper import create_experiments_helper
 name = globals()["script"][:-3]
 
 # params for all exps
-# params for all exps
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
@@ -25,10 +24,10 @@ config = {
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
     "serial_mode": False,
-    "use_pretrained_checkpoint": True,
+    "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
     "skip_train": 5_000_000,
-    "device": "gpu",
+    "device": "cpu",
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
 }
@@ -47,10 +46,7 @@ for atari_game in atari_games:
                 "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [False],
-                "init_critic_from_actor": [True, False],
-                "critic_mlp_layers": [[512, 512], [512], []],
-                "critic_layer_norm": [True, False],
- 		"normalize_returns": [True, False],
+                "init_critic_from_actor": [False],
                 "critic_learning_rate": [learning_rate * 5],
                 "freeze": [{"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0}],
                 "unfreeze": [

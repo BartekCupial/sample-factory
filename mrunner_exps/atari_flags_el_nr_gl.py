@@ -18,7 +18,7 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "flags exp_loss normalize_returns gae_lambda ",
+    "wandb_group": "flag normalize_returns",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -27,13 +27,13 @@ config = {
     "use_pretrained_checkpoint": True,
     "kickstarting_loss_coeff": 0.0,
     "skip_train": 5_000_000,
-    "device": "cpu",
+    "device": "gpu",
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
 }
 
 # params different between exps
-atari_games = ["breakout", "qbert", "montezuma"]
+atari_games = ["breakout"]
 
 params_grid = []
 
@@ -41,7 +41,7 @@ for atari_game in atari_games:
     for learning_rate in [1e-4]:
         params_grid += [
             {
-                "seed": list(range(1)),
+                "seed": list(range(3)),
                 "learning_rate": [learning_rate],
                 "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
                 "env": [f"atari_{atari_game}"],
@@ -49,9 +49,7 @@ for atari_game in atari_games:
                 "init_critic_from_actor": [True, False],
                 "critic_mlp_layers": [[512, 512], [512], []],
                 "critic_layer_norm": [True, False],
-		"exploration_loss_coeff": [0, 0.003],
  		"normalize_returns": [True, False],
-		"gae_lambda": [0.9, 0.95, 0.99],
                 "critic_learning_rate": [learning_rate * 5],
                 "freeze": [{"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0}],
                 "unfreeze": [
@@ -64,16 +62,14 @@ for atari_game in atari_games:
                 ],
             },
             {
-                "seed": list(range(1)),
+                "seed": list(range(3)),
                 "learning_rate": [learning_rate],
                 "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [True],
                 "critic_mlp_layers": [[512, 512], [512], []],
                 "critic_layer_norm": [True, False],
-		"exploration_loss_coeff": [0, 0.003],
  		"normalize_returns": [True, False],
-		"gae_lambda": [0.9, 0.95, 0.99],
                 "critic_learning_rate": [learning_rate * 5],
                 "freeze": [{"encoder": 0, "core": 0, "decoder": 0, "action_parameterization": 0}],
                 "unfreeze": [

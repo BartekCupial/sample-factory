@@ -3,7 +3,6 @@ from mrunner.helpers.specification_helper import create_experiments_helper
 name = globals()["script"][:-3]
 
 # params for all exps
-# params for all exps
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
@@ -19,16 +18,16 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "flag normalize_returns",
+    "wandb_group": "flag rs vc",
     "wandb_tags": [name],
-    "batch_size": 256,
-    "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
+    "batch_size": 512,
+    "dataset_batch_size": 1024,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
     "serial_mode": False,
     "use_pretrained_checkpoint": True,
     "kickstarting_loss_coeff": 0.0,
     "skip_train": 5_000_000,
-    "device": "gpu",
+    "device": "cpu",
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
 }
@@ -47,18 +46,20 @@ for atari_game in atari_games:
                 "model_path": [f"/atari_checkpoints/{atari_game}/default_experiment/"],
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [False],
-                "init_critic_from_actor": [True, False],
+                "init_critic_from_actor": [False],
                 "critic_mlp_layers": [[512, 512], [512], []],
                 "critic_layer_norm": [True, False],
- 		"normalize_returns": [True, False],
+                "normalize_returns": [False],
+                "reward_scale": [0.1, 0.5],
+                "ppo_clip_value": [0.2, 0.6, 1.0],
                 "critic_learning_rate": [learning_rate * 5],
                 "freeze": [{"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0}],
                 "unfreeze": [
                     {
-                        "actor_encoder": 10_000_000,
-                        "actor_core": 10_000_000,
-                        "actor_decoder": 10_000_000,
-                        "action_parameterization": 10_000_000,
+                        "actor_encoder": 50_000_000,
+                        "actor_core": 50_000_000,
+                        "actor_decoder": 50_000_000,
+                        "action_parameterization": 50_000_000,
                     }
                 ],
             },
