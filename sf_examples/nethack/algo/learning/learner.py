@@ -363,6 +363,8 @@ class DatasetLearner(Learner):
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
+            if self.cfg.clip_adv:
+                adv = torch.clamp(adv, -self.cfg.clip_adv, self.cfg.clip_adv)
 
         return dict(
             result=result,
