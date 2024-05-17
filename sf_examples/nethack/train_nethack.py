@@ -3,8 +3,11 @@ import sys
 from os.path import join
 from typing import Callable
 
+import torch.nn as nn
+
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.utils.context import global_model_factory, sf_global_context
+from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.cfg.arguments import load_from_path, parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
@@ -15,6 +18,7 @@ from sample_factory.utils.utils import log
 from sf_examples.nethack.algo.learning.learner import DatasetLearner
 from sf_examples.nethack.models import MODELS_LOOKUP
 from sf_examples.nethack.models.kickstarter import KickStarter
+from sf_examples.nethack.models.utils import linear_layernorm, model_layernorm
 from sf_examples.nethack.nethack_env import NETHACK_ENVS, make_nethack_env
 from sf_examples.nethack.nethack_params import (
     add_extra_params_general,
@@ -84,17 +88,51 @@ def load_pretrained_checkpoint_from_shared_weights(
     cfg.actor_critic_share_weights = False
     tmp_model: ActorCritic = create_model(cfg, obs_space, action_space)
 
+    # returns normalizer
     tmp_model.returns_normalizer = copy.deepcopy(model_shared.returns_normalizer)
+
+    # actor weights
     tmp_model.actor_encoder = copy.deepcopy(model_shared.encoder)
     tmp_model.actor_core = copy.deepcopy(model_shared.core)
-    tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
-    tmp_model.critic_core = copy.deepcopy(model_shared.core)
     tmp_model.actor_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
     tmp_model.action_parameterization = copy.deepcopy(model_shared.action_parameterization)
 
+    # we want to keep random critic when using layernorm
+    if not cfg.critic_add_layernorm:
+        # critic weights
+        tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
+        tmp_model.critic_core = copy.deepcopy(model_shared.core)
+        tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
+        tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
+
     model.load_state_dict(tmp_model.state_dict())
+
+    if cfg.critic_add_layernorm:
+        handles = []
+
+        def register_hooks(model):
+            def hook(module, input, output):
+                module.output_shape = output.shape
+                # print(f"{module.__class__.__name__} output shape: {output.shape}")
+
+            for name, child in model.named_children():
+                if isinstance(child, (nn.Linear, nn.Conv1d, nn.Conv2d)):
+                    handle = child.register_forward_hook(hook)
+                    handles.append(handle)
+                else:
+                    register_hooks(child)
+
+        register_hooks(model.critic_encoder)
+
+        tmp_env = make_env_func_batched(cfg, env_config=None)
+        obs, info = tmp_env.reset()
+        model.critic_encoder(obs)
+
+        model_layernorm(model.critic_encoder)
+        model.critic_linear = linear_layernorm(model.critic_linear)
+
+        for handle in handles:
+            handle.remove()
 
 
 def make_nethack_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
