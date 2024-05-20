@@ -18,7 +18,11 @@ from sample_factory.utils.utils import log
 from sf_examples.nethack.algo.learning.learner import DatasetLearner
 from sf_examples.nethack.models import MODELS_LOOKUP
 from sf_examples.nethack.models.kickstarter import KickStarter
-from sf_examples.nethack.models.utils import linear_layernorm, model_layernorm
+from sf_examples.nethack.models.utils import (
+    inject_layernorm_before_activation,
+    linear_layernorm,
+    replace_batchnorm_with_layernorm,
+)
 from sf_examples.nethack.nethack_env import NETHACK_ENVS, make_nethack_env
 from sf_examples.nethack.nethack_params import (
     add_extra_params_general,
@@ -128,7 +132,10 @@ def load_pretrained_checkpoint_from_shared_weights(
         obs, info = tmp_env.reset()
         model.critic_encoder(obs)
 
-        model_layernorm(model.critic_encoder)
+        if cfg.critic_replace_bn_with_ln:
+            replace_batchnorm_with_layernorm(model.critic_encoder)
+        inject_layernorm_before_activation(model.critic_encoder)
+
         model.critic_linear = linear_layernorm(model.critic_linear)
 
         for handle in handles:

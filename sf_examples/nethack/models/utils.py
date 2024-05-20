@@ -81,7 +81,7 @@ def inject_layernorm_before_activation(module):
                 if (
                     i + 1 < len(child)
                     and isinstance(child[i + 1], (nn.ELU, nn.ReLU, nn.Tanh))
-                    and not isinstance(child[i], nn.LayerNorm)
+                    and not isinstance(child[i], (nn.LayerNorm, nn.BatchNorm2d))
                 ):
                     # Inject LayerNorm before activation function
                     num_features = sub_child.output_shape[1:]

@@ -23,7 +23,7 @@ config = {
     "model": "ScaledNet",
     "use_resnet": True,
     "rnn_size": 1738,
-    "serial_mode": True,
+    "serial_mode": False,
 }
 
 # params different between exps
