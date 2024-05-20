@@ -42,6 +42,7 @@ def add_extra_params_model_scaled(parser):
     p = parser
     p.add_argument("--h_dim", type=int, default=1738)
     p.add_argument("--msg_hdim", type=int, default=64)
+    p.add_argument("--inventory_hdim", type=int, default=32)
     p.add_argument("--color_edim", type=int, default=16)
     p.add_argument("--char_edim", type=int, default=16)
     p.add_argument("--use_crop", type=str2bool, default=True)

@@ -50,8 +50,9 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
     env_class = nethack_env_by_name(env_name)
 
     observation_keys = (
-        "message",
-        "blstats",
+        # only used by chaotic dwarf, not needed by ScaledNet
+        # "message",
+        # "blstats",
         "tty_chars",
         "tty_colors",
         "tty_cursor",
@@ -60,10 +61,10 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         # "colors",
         # "chars",
         # "glyphs",
-        # "inv_glyphs",
-        # "inv_strs",
-        # "inv_letters",
-        # "inv_oclasses",
+        "inv_glyphs",
+        "inv_strs",
+        "inv_letters",
+        "inv_oclasses",
     )
 
     if cfg.gameloaddir:

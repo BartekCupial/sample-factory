@@ -27,6 +27,7 @@ class ScaledNet(Encoder):
         self.use_prev_action = cfg.use_prev_action
         self.msg_hdim = cfg.msg_hdim
         self.h_dim = cfg.h_dim
+        self.inventory_hdim = cfg.inventory_hdim
         self.il_mode = False
         self.scale_cnn_channels = 1
         self.num_lstm_layers = 1
@@ -90,6 +91,7 @@ class ScaledNet(Encoder):
 
         self.topline_encoder = TopLineEncoder(msg_hdim=self.msg_hdim)
         self.bottomline_encoder = BottomLinesEncoder(h_dim=self.blstats_hdim // 4)
+        self.inventory_encoder = InventoryEncoder(embedding_dim=self.inventory_hdim)
 
         self.screen_encoder = CharColorEncoderResnet(
             (self.screen_shape[0] - 3, self.screen_shape[1]),
@@ -117,6 +119,7 @@ class ScaledNet(Encoder):
             [
                 self.topline_encoder.msg_hdim,
                 self.bottomline_encoder.h_dim,
+                self.inventory_encoder.out_dim,
                 self.screen_encoder.h_dim,
                 self.prev_actions_dim,
                 self.crop_out_dim,
@@ -142,19 +145,28 @@ class ScaledNet(Encoder):
 
     def forward(self, obs_dict):
         B, H, W = obs_dict["tty_chars"].shape
+        # for k, v in obs_dict.items():
+        #     print("dupa", k, "shape", v.shape)
         # to process images with CNNs we need channels dim
         C = 1
 
         # Take last channel for now
         topline = obs_dict["tty_chars"][:, 0].contiguous()
         bottom_line = obs_dict["tty_chars"][:, -2:].contiguous()
+        inventory_glyphs = obs_dict["inv_glyphs"]
+        inventory_keys = obs_dict["inv_letters"]
+        inventory_classes = obs_dict["inv_oclasses"]
 
         # Blstats
         blstats_rep = self.bottomline_encoder(bottom_line.float(memory_format=torch.contiguous_format).view(B, -1))
 
+        # Inventory
+        inventory_encoding = self.inventory_encoder(inventory_glyphs, inventory_keys, inventory_classes)
+
         encodings = [
             self.topline_encoder(topline.float(memory_format=torch.contiguous_format).view(B, -1)),
             blstats_rep,
+            inventory_encoding,
         ]
 
         # Main obs encoding
@@ -360,6 +372,61 @@ class TopLineEncoder(nn.Module):
         # Characters start at 33 in ASCII and go to 128. 96 = 128 - 32
         message_normed = F.one_hot((message).long(), 256).reshape(-1, self.i_dim).float()
         return self.msg_fwd(message_normed)
+
+
+class InventoryEncoder(nn.Module):
+    INVENTORY_SIZE = 55
+
+    def __init__(self, embedding_dim: int):
+        super(InventoryEncoder, self).__init__()
+
+        self.out_dim = self.INVENTORY_SIZE * embedding_dim
+
+        self.glyphs_embedding = nn.Embedding(
+            nethack.MAX_GLYPH + 1,
+            embedding_dim,
+            # padding_idx=nethack.MAX_GLYPH,
+        )
+        self.keys_embedding = nn.Embedding(
+            256,
+            embedding_dim,
+            # padding_idx=0.
+        )
+        self.classes_embedding = nn.Embedding(
+            nethack.MAXOCLASSES + 1,
+            embedding_dim,
+            # padding_idx=nethack.MAXOCLASSES,
+        )
+
+    def forward(self, inv_glyps, inv_keys, inv_oclasses):
+        # normalized_glyph_ids = inv_glyps - nethack.GLYPH_OBJ_OFF
+        # normalized_glyph_ids = torch.where(
+        #     inv_glyps < nethack.MAX_GLYPH, inv_glyps - nethack.GLYPH_OBJ_OFF, nethack.NUM_OBJECTS
+        # )
+        # normalized_inv_keys = torch.where(inv_keys > 0, inv_keys - 32, 0)
+
+        # self._check_embedding_indices(normalized_glyph_ids, self.glyphs_embedding)
+        # self._check_embedding_indices(normalized_inv_keys, self.keys_embedding)
+        # self._check_embedding_indices(inv_oclasses, self.classes_embedding)
+
+        embedded_glyphs = selectt(self.glyphs_embedding, inv_glyps.long(), True)
+        embedded_inv_keys = selectt(self.keys_embedding, inv_keys.long(), True)
+        embedded_classes = selectt(self.classes_embedding, inv_oclasses.long(), True)
+
+        encoding = embedded_glyphs + embedded_inv_keys + embedded_classes
+        return encoding.view(-1, self.out_dim)
+
+    def _check_embedding_indices(self, input: torch.tensor, embedding: nn.Embedding):
+        num_embeddings, _ = embedding.weight.shape
+        if not (input < num_embeddings).all():
+            print("#" * 100)
+            print(
+                "\n\n\ndupa\n\n\n",
+            )
+            print("#" * 100)
+            print(input)
+            print(embedding)
+            assert False
 
 
 def conv_outdim(i_dim, k, padding=0, stride=1, dilation=1):
