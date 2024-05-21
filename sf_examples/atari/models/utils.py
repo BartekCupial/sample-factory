@@ -56,3 +56,75 @@ def unfreeze_selected(step, cfg, model, models_frozen):
 
             if cfg.freeze_batch_norm:
                 unfreeze_batch_norm(getattr(model, module_name))
+
+def replace_batchnorm_with_layernorm(module):
+    for i, child in enumerate(module.children()):
+        prevchild = None
+        for name, subchild in child.named_children():
+            if prevchild is not None and isinstance(subchild, nn.BatchNorm2d):
+                num_features = prevchild.output_shape[1:]
+                new_child = nn.LayerNorm(num_features)
+                setattr(child, name, new_child)
+            prevchild = subchild
+
+        replace_batchnorm_with_layernorm(child)
+
+
+def inject_layernorm_before_activation(module):
+    for name, child in module.named_children():
+        if isinstance(child, nn.Sequential):
+            new_children = []
+            for i, (sub_name, sub_child) in enumerate(child.named_children()):
+                # Check if the next layer is an activation function and the current layer is not LayerNorm
+                new_children.append(sub_child)
+                if (
+                    i + 1 < len(child)
+                    and isinstance(child[i + 1], (nn.ELU, nn.ReLU, nn.Tanh))
+                    and not isinstance(child[i], (nn.LayerNorm, nn.BatchNorm2d))
+                ):
+                    # Inject LayerNorm before activation function
+                    num_features = sub_child.output_shape[1:]
+                    new_layer = nn.LayerNorm(num_features)
+                    new_children.append(new_layer)
+            setattr(module, name, nn.Sequential(*new_children))
+        else:
+            inject_layernorm_before_activation(child)
+
+
+def sequential_layernorm(module):
+    # Initialize an empty list to hold the new layers
+    new_layers = []
+
+    # Iterate through each layer in the original module
+    for i, layer in enumerate(module):
+        # Add the original layer to the new layers list
+        new_layers.append(layer)
+
+        # Check if the current layer is a Linear layer
+        if (
+            i + 1 < len(module)
+            and isinstance(module[i + 1], (nn.ELU, nn.ReLU, nn.Tanh))
+            and not isinstance(module[i], nn.LayerNorm)
+        ):
+            # Inject LayerNorm before activation function
+            num_features = layer.output_shape[1:]
+            new_layer = nn.LayerNorm(num_features)
+            new_layers.append(new_layer)
+
+    # Use nn.Sequential to create a new module from the new layers list
+    new_module = nn.Sequential(*new_layers)
+    return new_module
+
+
+def linear_layernorm(module):
+    new_layers = []
+    num_features = module.in_features
+    new_layers.append(nn.LayerNorm([num_features]))
+    new_layers.append(module)
+    new_module = nn.Sequential(*new_layers)
+    return new_module
+
+
+def model_layernorm(model):
+    replace_batchnorm_with_layernorm(model)
+    inject_layernorm_before_activation(model)

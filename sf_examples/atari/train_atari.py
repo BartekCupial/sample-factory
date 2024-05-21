@@ -3,9 +3,11 @@ import copy
 import sys
 from os.path import join
 from typing import Callable
+import torch.nn as nn
 
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.utils.context import global_model_factory, sf_global_context
+from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.cfg.arguments import load_from_path, parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
@@ -17,6 +19,11 @@ from sf_examples.atari.algo.learning.learner import DatasetLearner
 from sf_examples.atari.atari_params import atari_override_defaults
 from sf_examples.atari.atari_utils import ATARI_ENVS, make_atari_env
 from sf_examples.atari.models.kickstarter import KickStarter
+from sf_examples.atari.models.utils import (
+    inject_layernorm_before_activation,
+    linear_layernorm,
+    replace_batchnorm_with_layernorm,
+)
 
 
 def register_atari_envs():
@@ -177,7 +184,45 @@ def load_pretrained_checkpoint_from_shared_weights(
         tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
     # tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
 
+    # we want to keep random critic when using layernorm
+    if not cfg.critic_add_layernorm:
+        # critic weights
+        tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
+        tmp_model.critic_core = copy.deepcopy(model_shared.core)
+        tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
+        tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
+
     model.load_state_dict(tmp_model.state_dict(), strict=False)
+
+    if cfg.critic_add_layernorm:
+        handles = []
+
+        def register_hooks(model):
+            def hook(module, input, output):
+                module.output_shape = output.shape
+                # print(f"{module.__class__.__name__} output shape: {output.shape}")
+
+            for name, child in model.named_children():
+                if isinstance(child, (nn.Linear, nn.Conv1d, nn.Conv2d)):
+                    handle = child.register_forward_hook(hook)
+                    handles.append(handle)
+                else:
+                    register_hooks(child)
+
+        register_hooks(model.critic_encoder)
+
+        tmp_env = make_env_func_batched(cfg, env_config=None)
+        obs, info = tmp_env.reset()
+        model.critic_encoder(obs)
+
+        if cfg.critic_replace_bn_with_ln:
+            replace_batchnorm_with_layernorm(model.critic_encoder)
+        inject_layernorm_before_activation(model.critic_encoder)
+
+        model.critic_linear = linear_layernorm(model.critic_linear)
+
+        for handle in handles:
+            handle.remove()
 
 
 def add_extra_params_general(parser):
@@ -224,6 +269,8 @@ def add_extra_params_general(parser):
         default=None,
         help="this parameter doesn't work with with lr_scheduler, it will be overwritten.",
     )
+    p.add_argument("--critic_add_layernorm", type=ast.literal_eval, default=False)
+    p.add_argument("--critic_replace_bn_with_ln", type=ast.literal_eval, default=True)
 
 
 def main():  # pragma: no cover
