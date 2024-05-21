@@ -3,6 +3,7 @@ import sys
 from os.path import join
 from typing import Callable
 
+import torch
 import torch.nn as nn
 
 from sample_factory.algo.learning.learner import Learner
@@ -12,6 +13,7 @@ from sample_factory.cfg.arguments import load_from_path, parse_full_cfg, parse_s
 from sample_factory.envs.env_utils import register_env
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
 from sample_factory.model.encoder import Encoder
+from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.train import run_rl
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log
@@ -71,7 +73,8 @@ def load_pretrained_checkpoint(model, checkpoint_dir: str, checkpoint_kind: str,
         del checkpoint_dict["model"]["returns_normalizer.running_var"]
         del checkpoint_dict["model"]["returns_normalizer.count"]
 
-    model.load_state_dict(checkpoint_dict["model"])
+    incompatibile = model.load_state_dict(checkpoint_dict["model"], strict=False)
+    log.debug(incompatibile)
 
 
 def load_pretrained_checkpoint_from_shared_weights(
@@ -126,17 +129,19 @@ def load_pretrained_checkpoint_from_shared_weights(
                 else:
                     register_hooks(child)
 
-        register_hooks(model.critic_encoder)
+        register_hooks(model)
 
         tmp_env = make_env_func_batched(cfg, env_config=None)
         obs, info = tmp_env.reset()
-        model.critic_encoder(obs)
+        rnn_states = torch.zeros([1, get_rnn_size(cfg)], dtype=torch.float32)
+        model(obs, rnn_states)
 
         if cfg.critic_replace_bn_with_ln:
             replace_batchnorm_with_layernorm(model.critic_encoder)
         inject_layernorm_before_activation(model.critic_encoder)
 
-        model.critic_linear = linear_layernorm(model.critic_linear)
+        inject_layernorm_before_activation(model.critic)
+        model.critic.critic_linear = linear_layernorm(model.critic.critic_linear)
 
         for handle in handles:
             handle.remove()

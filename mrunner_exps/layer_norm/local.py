@@ -38,6 +38,7 @@ params_grid = [
         "freeze": [{"actor_encoder": 0, "actor_core": 0, "actor_decoder": 0, "action_parameterization": 0}],
         "actor_critic_share_weights": [False],
         "critic_add_layernorm": [True],
+        "critic_mlp_layers": [[512], [512, 512], [512, 512, 512]],
     },
 ]
 
