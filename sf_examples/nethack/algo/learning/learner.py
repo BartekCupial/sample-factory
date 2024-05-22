@@ -140,7 +140,6 @@ class DatasetLearner(Learner):
                 [
                     use_supervised_loss,
                     use_distillation_loss,
-                    use_kickstarting_loss,
                     use_sil_loss,
                 ]
             )
@@ -156,7 +155,7 @@ class DatasetLearner(Learner):
         self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
         self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
         self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
-        self.sil_loss_func = self._sil_loss if use_sil_loss else lambda *_: 0.0, 0.0
+        self.sil_loss_func = self._sil_loss if use_sil_loss else lambda *_: (0.0, 0.0)
         self.calc_accuracy_func = self._calc_accuracy if self.cfg.calc_accuracy else lambda *_: 0.0
 
         return init_model_data
@@ -297,7 +296,7 @@ class DatasetLearner(Learner):
         action_logits = F.log_softmax(mb_results["action_logits"].flatten(0, 1), dim=-1)
         actions = mb["actions"].flatten(0, 1).unsqueeze(-1).long()
         log_prob_actions = torch.gather(action_logits, 1, actions).squeeze(-1)
-        adv = torch.clamp(F.relu(targets - values), 0, self.sil_clip_coeff).detach()
+        adv = torch.clamp(F.relu(targets - values), 0, self.cfg.sil_clip_coeff).detach()
         policy_loss = -log_prob_actions * adv
         policy_loss = policy_loss.mean()
 

@@ -26,6 +26,9 @@ config = {
     "dataset_batch_size": 4096,  # this equals bs = 256, 256 * 32 = 8192
     "use_pretrained_checkpoint": True,
     "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
+    "kickstarting_loss_coeff": 0.5,
+    "teacher_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
+    "run_teacher_hs": False,
     "use_prev_action": True,
     "model": "ScaledNet",
     "use_resnet": True,
@@ -44,9 +47,10 @@ params_grid = [
     {
         "seed": list(range(1)),
         "freeze": [{"encoder": 0}],
+        "kickstarting_loss_coeff": [0.75, 0.5, 0.3, 0.1],
         "sil_loss_coeff": [2.0, 1.0, 0.5, 0.1],
-        "sil_beta_coeff": [1.0, 0.5, 0.1],
-        "sil_clip_coeff": [1.0],
+        "sil_beta_coeff": [1.0],
+        "kickstarting_loss_decay": [0.99998],
     },
 ]
 

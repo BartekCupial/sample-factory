@@ -42,7 +42,7 @@ params_grid = [
     {
         "seed": list(range(1)),
         "freeze": [{"encoder": 0}],
-        "sil_loss_coeff": [1.0, 0.5, 0.1],
+        "sil_loss_coeff": [2.0, 1.0, 0.5, 0.1],
         "sil_beta_coeff": [1.0, 0.5, 0.1],
         "sil_clip_coeff": [1.0],
     },
