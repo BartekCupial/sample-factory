@@ -225,7 +225,31 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        if self.cfg.learning_rate_groups:
+            all_parameters = set(self.actor_critic.parameters())
+            custom_lr_parameters = set()
+
+            params = [
+                {
+                    "params": list(getattr(self.actor_critic, name).parameters()),
+                    "lr": value,
+                }
+                for name, value in self.cfg.learning_rate_groups.items()
+            ]
+
+            # Add the parameters with custom learning rates to the set
+            for p in params:
+                custom_lr_parameters.update(p["params"])
+
+            # Determine the remaining parameters that do not have a custom learning rate
+            default_lr_parameters = list(all_parameters - custom_lr_parameters)
+
+            # If there are any remaining parameters, add them with the default learning rate
+            if default_lr_parameters:
+                default_lr = self.cfg.learning_rate  # Set your default learning rate here
+                params.append({"params": default_lr_parameters, "lr": default_lr})
+        else:
+            params = list(self.actor_critic.parameters())
 
         optimizer_cls = dict(
             sgd=torch.optim.SGD,
@@ -259,7 +283,7 @@ class Learner(Configurable):
 
         self.lr_scheduler = get_lr_scheduler(self.cfg)
         self.curr_lr = self.cfg.learning_rate if self.curr_lr is None else self.curr_lr
-        self._apply_lr(self.curr_lr)
+        # self._apply_lr(self.curr_lr) # TODO: turned off becase schedulers doesn't support setting lr for param groups
 
         self.is_initialized = True
 
