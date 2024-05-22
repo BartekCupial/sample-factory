@@ -156,7 +156,7 @@ class DatasetLearner(Learner):
         self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
         self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
         self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
-        self.sil_loss_func = self._sil_loss if use_sil_loss else lambda *_: 0.0
+        self.sil_loss_func = self._sil_loss if use_sil_loss else lambda *_: 0.0, 0.0
         self.calc_accuracy_func = self._calc_accuracy if self.cfg.calc_accuracy else lambda *_: 0.0
 
         return init_model_data
@@ -289,10 +289,7 @@ class DatasetLearner(Learner):
         self.actor_critic.returns_normalizer(targets)  # inplace
         self.actor_critic.train(True)
 
-        diff = targets - values
-        mask = diff > 0
-        diff = masked_select(diff, mask, mask.sum())
-        value_loss = diff.pow(2)
+        value_loss = F.relu(targets - values).pow(2)
         value_loss = value_loss.mean()
 
         value_loss *= self.cfg.sil_loss_coeff * self.cfg.sil_beta_coeff
@@ -300,13 +297,13 @@ class DatasetLearner(Learner):
         action_logits = F.log_softmax(mb_results["action_logits"].flatten(0, 1), dim=-1)
         actions = mb["actions"].flatten(0, 1).unsqueeze(-1).long()
         log_prob_actions = torch.gather(action_logits, 1, actions).squeeze(-1)
-        log_prob_actions = masked_select(log_prob_actions, mask, mask.sum())
-        policy_loss = -log_prob_actions * torch.clamp(diff.detach(), 0, 1)
+        adv = torch.clamp(F.relu(targets - values), 0, self.sil_clip_coeff).detach()
+        policy_loss = -log_prob_actions * adv
         policy_loss = policy_loss.mean()
 
         policy_loss *= self.cfg.sil_loss_coeff
 
-        return policy_loss + value_loss
+        return policy_loss, 0.5 * value_loss
 
     def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
         with torch.no_grad(), self.timing.add_time("losses_init"):
@@ -507,7 +504,7 @@ class DatasetLearner(Learner):
             )
 
         with self.timing.add_time("sil_loss"):
-            sil_loss = self.sil_loss_func(
+            sil_policy_loss, sil_value_loss = self.sil_loss_func(
                 dataset_mb_results,
                 dataset_mb,
                 dataset_num_invalids,
@@ -525,12 +522,13 @@ class DatasetLearner(Learner):
             adv_std=adv_std,
             adv_mean=adv_mean,
         )
-        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss + sil_loss
+        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss + sil_policy_loss + sil_value_loss
         regularizer_loss_summaries = dict(
             supervised_loss=to_scalar(supervised_loss),
             distillation_loss=to_scalar(distillation_loss),
             kickstarting_loss=to_scalar(kickstarting_loss),
-            sil_loss=to_scalar(sil_loss),
+            sil_policy_loss=to_scalar(sil_policy_loss),
+            sil_value_loss=to_scalar(sil_value_loss),
             accuracy=to_scalar(accuracy),
         )
 

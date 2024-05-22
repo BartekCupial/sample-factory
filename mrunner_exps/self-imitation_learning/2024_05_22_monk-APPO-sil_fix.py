@@ -24,8 +24,6 @@ config = {
     "use_dataset": True,
     "dataset_rollout": 32,
     "dataset_batch_size": 4096,  # this equals bs = 256, 256 * 32 = 8192
-    "use_pretrained_checkpoint": True,
-    "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "use_prev_action": True,
     "model": "ScaledNet",
     "use_resnet": True,
@@ -46,6 +44,7 @@ params_grid = [
         "freeze": [{"encoder": 0}],
         "sil_loss_coeff": [1.0, 0.5, 0.1],
         "sil_beta_coeff": [1.0, 0.5, 0.1],
+        "sil_clip_coeff": [1.0],
     },
 ]
 
