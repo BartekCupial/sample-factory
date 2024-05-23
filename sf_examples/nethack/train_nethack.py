@@ -115,6 +115,9 @@ def load_pretrained_checkpoint_from_shared_weights(
     model.load_state_dict(tmp_model.state_dict())
 
     if cfg.critic_add_layernorm:
+        # ensude that we don't modify batchnorm weights in the actor
+        model.train(mode=False)
+
         handles = []
 
         def register_hooks(model):
@@ -130,13 +133,10 @@ def load_pretrained_checkpoint_from_shared_weights(
                     register_hooks(child)
 
         register_hooks(model)
-
         tmp_env = make_env_func_batched(cfg, env_config=None)
         obs, info = tmp_env.reset()
         rnn_states = torch.zeros([1, get_rnn_size(cfg)], dtype=torch.float32)
-        model.train(mode=False)
         model(obs, rnn_states)
-        model.train(mode=True)
 
         if cfg.critic_replace_bn_with_ln:
             replace_batchnorm_with_layernorm(model.critic_encoder)
@@ -147,6 +147,8 @@ def load_pretrained_checkpoint_from_shared_weights(
 
         for handle in handles:
             handle.remove()
+
+        model.train(mode=True)
 
 
 def make_nethack_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
