@@ -134,7 +134,9 @@ def load_pretrained_checkpoint_from_shared_weights(
         tmp_env = make_env_func_batched(cfg, env_config=None)
         obs, info = tmp_env.reset()
         rnn_states = torch.zeros([1, get_rnn_size(cfg)], dtype=torch.float32)
+        model.train(mode=False)
         model(obs, rnn_states)
+        model.train(mode=True)
 
         if cfg.critic_replace_bn_with_ln:
             replace_batchnorm_with_layernorm(model.critic_encoder)
