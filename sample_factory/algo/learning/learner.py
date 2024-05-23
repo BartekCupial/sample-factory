@@ -225,7 +225,7 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        if self.cfg.learning_rate_groups:
+        if self.cfg.learning_rate_groups is not None:
             all_parameters = set(self.actor_critic.parameters())
             custom_lr_parameters = set()
 
