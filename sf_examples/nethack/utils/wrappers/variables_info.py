@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 
 from sf_examples.nethack.utils.blstats import BLStats
 from sf_examples.nethack.utils.score import Score
@@ -49,7 +49,7 @@ class VariablesInfoWrapper(gym.Wrapper):
     def step(self, action):
         # use tuple and copy to avoid shallow copy (`last_observation` would be the same as `observation`)
         last_observation = tuple(a.copy() for a in self.env.unwrapped.last_observation)
-        obs, reward, done, info = super().step(action)
+        obs, reward, terminated, truncated, info = super().step(action)
         observation = tuple(a.copy() for a in self.env.unwrapped.last_observation)
         end_status = info["end_status"]
 
@@ -57,4 +57,4 @@ class VariablesInfoWrapper(gym.Wrapper):
         blstats_info = self._parse_blstats(observation)
         info = {**info, **blstats_info, **score_info}
 
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info

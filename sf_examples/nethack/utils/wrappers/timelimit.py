@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 from nle.env.base import NLE
 
 
@@ -7,6 +7,6 @@ class NLETimeLimit(gym.Wrapper):
         super().__init__(env)
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         info["TimeLimit.truncated"] = True if info["end_status"] == NLE.StepStatus.ABORTED else False
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info

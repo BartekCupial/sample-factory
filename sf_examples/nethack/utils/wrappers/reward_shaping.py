@@ -1,7 +1,7 @@
 from collections import deque
 from typing import Callable
 
-import gym
+import gymnasium as gym
 
 from sample_factory.algo.utils.misc import EPS
 from sample_factory.envs.env_utils import RewardShapingInterface
@@ -154,7 +154,7 @@ class NetHackRewardShapingWrapper(gym.Wrapper, RewardShapingInterface):
         return shaping_reward
 
     def reset(self, **kwargs):
-        obs = self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
 
         self.prev_vars = dict()
         self.sokoban_level = None
@@ -163,14 +163,14 @@ class NetHackRewardShapingWrapper(gym.Wrapper, RewardShapingInterface):
         self.orig_env_reward = self.total_shaping_reward = 0.0
 
         self.print_once = False
-        return obs
+        return obs, info
 
     def step(self, action):
-        obs, rew, done, info = self.env.step(action)
+        obs, rew, terminated, truncated, info = self.env.step(action)
 
         self.orig_env_reward += rew
 
-        shaping_rew = self._parse_info(info, done)
+        shaping_rew = self._parse_info(info, terminated or truncated)
         # IMPORTANT: we use shaping reward as a substitue for reward
         rew = shaping_rew
         self.total_shaping_reward += shaping_rew
@@ -181,14 +181,14 @@ class NetHackRewardShapingWrapper(gym.Wrapper, RewardShapingInterface):
             log.info(
                 "Total shaping reward is %.3f (done %d)",
                 self.total_shaping_reward,
-                done,
+                terminated or truncated,
             )
 
         # remember new variable values
         for var_name in self.reward_shaping_scheme["delta"].keys():
             self.prev_vars[var_name] = info.get(var_name, 0.0)
 
-        if done:
+        if terminated or truncated:
             if self.true_objective_func is None:
                 true_objective = self.orig_env_reward
             else:
@@ -196,7 +196,7 @@ class NetHackRewardShapingWrapper(gym.Wrapper, RewardShapingInterface):
 
             info["true_objective"] = true_objective
 
-        return obs, rew, done, info
+        return obs, rew, terminated, truncated, info
 
     def close(self):
         self.env.unwrapped.reward_shaping_interface = None

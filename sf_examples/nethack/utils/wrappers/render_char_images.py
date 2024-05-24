@@ -23,7 +23,7 @@ import importlib.resources
 from typing import Any, SupportsFloat
 
 import cv2
-import gym
+import gymnasium as gym
 import numpy as np
 import render_utils
 from nle import nethack
@@ -199,14 +199,14 @@ class RenderCharImagesWithNumpyWrapper(gym.Wrapper):
         return obs
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         obs = self._render_text_to_image(obs)
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
-        obs = self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
         obs = self._render_text_to_image(obs)
-        return obs
+        return obs, info
 
 
 class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):
@@ -267,14 +267,14 @@ class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):
         obs["screen_image"] = screen
 
     def step(self, action: Any) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         self._populate_obs(obs)
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
-        obs = self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
         self._populate_obs(obs)
-        return obs
+        return obs, info
 
     def render(self, mode="human"):
         if mode == "rgb_array":
