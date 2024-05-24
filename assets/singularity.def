@@ -1,6 +1,7 @@
 Bootstrap: docker
 # From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
 From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+# From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 %environment
     export DEBIAN_FRONTEND=noninteractive
@@ -48,7 +49,6 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
     conda update -n base -c defaults conda
     conda install -yq cmake flex bison lit
     conda install -yq pybind11 -c conda-forge
-    conda install -yq pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 
     # install render_utils
     cd /dungeons/
@@ -57,11 +57,18 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
     pip install -e .
     cd ../../..
 
+    git clone https://github.com/BartekCupial/nle.git nle && cd nle \
+    && git submodule init && git submodule update --recursive \
+    && sed '/#define NLE_ALLOW_SEEDING 1/i#define NLE_ALLOW_SEEDING 1' include/nleobs.h -i \
+    && sed '/self\.nethack\.set_initial_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.set_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.get_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/def seed(self, core=None, disp=None, reseed=True):/d' nle/env/tasks.py -i \
+    && sed '/raise RuntimeError("NetHackChallenge doesn.t allow seed changes")/d' nle/env/tasks.py -i \
+    && python setup.py install && cd ..
+
     # install sample factory
     pip install .[dev,nethack,mrunner]
-
-    # Test NLE.
-    python -c 'import gym; import nle; env = gym.make("NetHackScore-v0"); env.reset()'
 
     chmod a+rw -R /opt/conda/bin/python
 
