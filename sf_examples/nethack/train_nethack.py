@@ -110,7 +110,7 @@ def load_pretrained_checkpoint_from_shared_weights(
         tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
         tmp_model.critic_core = copy.deepcopy(model_shared.core)
         tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
-        tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
+        tmp_model.critic = copy.deepcopy(model_shared.critic)
 
     model.load_state_dict(tmp_model.state_dict())
 

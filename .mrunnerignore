@@ -9,6 +9,7 @@ nle/
 minihack
 notebooks/
 artifacts/
+sf_examples/vizdoom/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
