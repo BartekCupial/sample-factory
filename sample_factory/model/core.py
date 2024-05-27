@@ -48,7 +48,7 @@ class ModelCoreRNN(ModelCore):
         if self.is_gru:
             x, new_rnn_states = self.core(head_output, rnn_states.contiguous())
         else:
-            h, c = torch.split(rnn_states, self.cfg.rnn_size, dim=2)
+            h, c = torch.chunk(rnn_states, 2, dim=2)
             x, (h, c) = self.core(head_output, (h.contiguous(), c.contiguous()))
             new_rnn_states = torch.cat((h, c), dim=2)
 

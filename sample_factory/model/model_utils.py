@@ -26,6 +26,9 @@ def get_rnn_size(cfg):
             # teacher and student need separate states
             size *= 2
 
+    if cfg.critic_increase_factor:
+        size = int(size * 0.5 * (1 + cfg.critic_increase_factor))
+
     return size
 
 
