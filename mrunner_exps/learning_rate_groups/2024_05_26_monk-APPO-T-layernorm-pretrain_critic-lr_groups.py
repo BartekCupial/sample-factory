@@ -78,7 +78,7 @@ for rollout in [128]:
                         "actor_encoder": actor_learning_rate,
                         "actor_core": actor_learning_rate,
                         "actor_decoder": actor_learning_rate,
-                        "actor_action_parameterization": actor_learning_rate,
+                        "action_parameterization": actor_learning_rate,
                     }
                 ]
 
