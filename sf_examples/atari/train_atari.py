@@ -224,6 +224,7 @@ def add_extra_params_general(parser):
         default=None,
         help="this parameter doesn't work with with lr_scheduler, it will be overwritten.",
     )
+    p.add_argument("--remove_critic", type=str2bool, default=False)
 
 
 def main():  # pragma: no cover
