@@ -107,6 +107,9 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
         cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode
     )
     env_info = extract_env_info(env, cfg)
+    env.unwrapped.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
 
     if hasattr(env.unwrapped, "reset_on_init"):
         # reset call ruins the demo recording for VizDoom
@@ -122,7 +125,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     name_prefix = dict(latest="checkpoint", best="best")[cfg.load_checkpoint_kind]
     checkpoints = Learner.get_checkpoints(Learner.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*")
     checkpoint_dict = Learner.load_checkpoint(checkpoints, device)
-    actor_critic.load_state_dict(checkpoint_dict["model"])
+    actor_critic.load_state_dict(checkpoint_dict["model"], strict=False)
 
     episode_rewards = [deque([], maxlen=100) for _ in range(env.num_agents)]
     true_objectives = [deque([], maxlen=100) for _ in range(env.num_agents)]
@@ -135,7 +138,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
 
     reward_list = []
 
-    obs, infos = env.reset()
+    obs, infos = env.reset(seed=cfg.seed)
     rnn_states = torch.zeros([env.num_agents, get_rnn_size(cfg)], dtype=torch.float32, device=device)
     episode_reward = None
     finished_episode = [False for _ in range(env.num_agents)]

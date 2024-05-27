@@ -323,7 +323,7 @@ class Learner(Configurable):
             self.train_step = checkpoint_dict["train_step"]
             self.env_steps = checkpoint_dict["env_steps"]
             self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
-        self.actor_critic.load_state_dict(checkpoint_dict["model"])
+        self.actor_critic.load_state_dict(checkpoint_dict["model"], strict=False)
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
 
