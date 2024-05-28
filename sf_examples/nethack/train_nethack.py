@@ -118,6 +118,22 @@ def load_pretrained_checkpoint_from_shared_weights(
 
     model.load_state_dict(tmp_model.state_dict())
 
+    if cfg.critic_increase_factor != 1:
+        factor = cfg.critic_increase_factor
+
+        assert factor % 2 == 0, "Scaling factor should be divisable by 2!"
+
+        scale_width_critic(model, factor=factor)
+        downscale_input_layer(model.critic_encoder.topline_encoder.msg_fwd, "0", factor)
+        downscale_input_layer(model.critic_encoder.bottomline_encoder.conv_net, "0", factor)
+        downscale_input_layer(model.critic_encoder.screen_encoder.conv_net[0], "0", factor)
+        downscale_input_layer(model.critic_encoder.extract_crop_representation, "0", factor)
+        # we add one hots and we need to take into account that they arent scaled
+        reduce_input_layer(model.critic_encoder.fc, "0", 121 * (factor - 1))
+        downscale_output_layer(model.critic, "critic_linear", factor)
+
+        model.critic_encoder.screen_encoder.out_size *= factor
+
     if cfg.critic_add_layernorm:
         # ensude that we don't modify batchnorm weights in the actor
         model.train(mode=False)
@@ -153,22 +169,6 @@ def load_pretrained_checkpoint_from_shared_weights(
             handle.remove()
 
         model.train(mode=True)
-
-    if cfg.critic_increase_factor != 1:
-        factor = cfg.critic_increase_factor
-
-        assert factor % 2 == 0, "Scaling factor should be divisable by 2!"
-
-        scale_width_critic(model, factor=factor)
-        downscale_input_layer(model.critic_encoder.topline_encoder.msg_fwd, "0", factor)
-        downscale_input_layer(model.critic_encoder.bottomline_encoder.conv_net, "0", factor)
-        downscale_input_layer(model.critic_encoder.screen_encoder.conv_net[0], "0", factor)
-        downscale_input_layer(model.critic_encoder.extract_crop_representation, "0", factor)
-        # we add one hots and we need to take into account that they arent scaled
-        reduce_input_layer(model.critic_encoder.fc, "0", 121 * (factor - 1))
-        downscale_output_layer(model.critic, "critic_linear", factor)
-
-        model.critic_encoder.screen_encoder.out_size *= factor
 
 
 def make_nethack_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:

@@ -35,18 +35,18 @@ config = {
 }
 
 params_grid = []
-expected_batch_size = 4096
+expected_batch_size = 2048
 
 for rollout in [128]:
     for target_batch_size in [128]:
         batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
         batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
         optim_step_every_ith = max(1, batches_to_accumulate // 8)
-        for actor_learning_rate in [0.00005, 0.00001, 0.000005, 0.000001]:
+        for actor_learning_rate in [0.00001, 0.000005, 0.000001]:
             params_grid.append(
                 {
                     "seed": list(range(1)),
-                    "learning_rate": [0.0001],
+                    "learning_rate": [0.0001, 0.00005, 0.00001],
                     "freeze": [
                         {
                             "actor_encoder": 0,
@@ -78,7 +78,7 @@ for rollout in [128]:
                             "action_parameterization": actor_learning_rate,
                         }
                     ],
-                    "gae_lambda": [0, 0.2, 0.4, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0],
+                    "critic_increase_factor": [1, 2, 4],
                 }
             )
 

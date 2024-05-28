@@ -42,6 +42,7 @@ params_grid = [
         "freeze": [{"actor_encoder": 0}],
         "learning_rate_groups": [{"critic": 0.001, "action_parameterization": 0.1}],
         "critic_increase_factor": [2],
+        "critic_add_layernorm": [True],
         "actor_critic_share_weights": [False],
     },
 ]
