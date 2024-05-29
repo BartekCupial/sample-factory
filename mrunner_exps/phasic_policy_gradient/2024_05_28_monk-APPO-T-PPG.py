@@ -79,11 +79,12 @@ for rollout in [128]:
                             "action_parameterization": actor_learning_rate,
                         }
                     ],
+                    "aux_train": [True],
                     "aux_num_epochs": [3, 6, 9],
                     "aux_train_frequency": [8, 16],
                     "aux_kl_loss_coeff": [1.0],
                     "aux_batch_size": [batch_size],
-                    "heartbeat_reporting_interval": [180 * 4],
+                    "heartbeat_reporting_interval": [3600],
                 }
             )
 
