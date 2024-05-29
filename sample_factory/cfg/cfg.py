@@ -245,6 +245,23 @@ def add_rl_args(p: ArgumentParser):
         "Empirically, symmetric KL-divergence yielded slightly better results on some problems.",
     )
 
+    # phasic policy gradient
+    p.add_argument("--aux_train", default=False, type=str2bool, help="Do we want to include aux loss from PPG.")
+    p.add_argument("--aux_num_epochs", default=6, type=int, help="Number of auxiliary epochs in the auxiliary phase.")
+    p.add_argument(
+        "--aux_train_frequency",
+        default=32,
+        type=int,
+        help="Number of policy phase iteration steps before we go to the auxiliary phase.",
+    )
+    p.add_argument("--aux_batch_size", default=1024, type=int, help="Minibatch size for PPG.")
+    p.add_argument(
+        "--aux_kl_loss_coeff",
+        default=1.0,
+        type=float,
+        help="Coefficient for aux KL loss",
+    )
+
     # more specific to policy gradient algorithms or PPO
     p.add_argument(
         "--gae_lambda",

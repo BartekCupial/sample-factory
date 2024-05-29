@@ -5,10 +5,11 @@ import os
 import time
 from abc import ABC, abstractmethod
 from os.path import join
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from nle import nethack
 from torch import Tensor
 from torch.nn import Module
@@ -21,7 +22,13 @@ from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.optimizers import AdamTensorFlowStyle, Lamb
 from sample_factory.algo.utils.rl_utils import gae_advantages, prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
-from sample_factory.algo.utils.tensor_dict import TensorDict, shallow_recursive_copy
+from sample_factory.algo.utils.tensor_dict import (
+    TensorDict,
+    cat_tensordicts,
+    shallow_recursive_copy,
+    tensor_dict_to_cpu,
+    tensor_dict_to_cuda,
+)
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.cfg.configurable import Configurable
 from sample_factory.model.actor_critic import ActorCritic, create_actor_critic
@@ -175,6 +182,8 @@ class Learner(Configurable):
         self.exploration_loss_func: Optional[Callable] = None
         self.kl_loss_func: Optional[Callable] = None
 
+        self.aux_batch = None
+
         self.is_initialized = False
 
     def init(self) -> InitModelData:
@@ -284,6 +293,9 @@ class Learner(Configurable):
         self.lr_scheduler = get_lr_scheduler(self.cfg)
         self.curr_lr = self.cfg.learning_rate if self.curr_lr is None else self.curr_lr
         # self._apply_lr(self.curr_lr) # TODO: turned off becase schedulers doesn't support setting lr for param groups
+
+        if self.cfg.aux_train:
+            self.aux_batch = []
 
         self.is_initialized = True
 
@@ -502,6 +514,30 @@ class Learner(Configurable):
 
         return kl_old, kl_loss
 
+    def _aux_kl_loss(self, old_action_logits, action_logits, valids, num_invalids: int) -> Tensor:
+        # we want to be equivalent to reduction "batchmean",
+        # first we will sum div on every single distribution and leave the batch intact
+        # after masked_select we will average what is left
+        kl_loss = F.kl_div(
+            F.log_softmax(action_logits, dim=-1),
+            F.log_softmax(old_action_logits, dim=-1),
+            log_target=True,
+            reduction="none",
+        ).sum(axis=1)
+        kl_loss = masked_select(kl_loss, valids, num_invalids)
+        kl_loss = kl_loss.mean()
+
+        kl_loss *= self.cfg.aux_kl_loss_coeff
+
+        return kl_loss
+
+    def _aux_value_loss(self, values, target, valids, num_invalids: int) -> Tensor:
+        value_loss = 0.5 * (values - target).pow(2)
+        value_loss = masked_select(value_loss, valids, num_invalids)
+        value_loss = value_loss.mean()
+
+        return value_loss
+
     def _entropy_exploration_loss(self, action_distribution, valids, num_invalids: int) -> Tensor:
         entropy = action_distribution.entropy()
         entropy = masked_select(entropy, valids, num_invalids)
@@ -531,7 +567,7 @@ class Learner(Configurable):
         """Generating minibatches for training."""
         assert self.cfg.rollout % self.cfg.recurrence == 0
         assert experience_size % batch_size == 0, f"experience size: {experience_size}, batch size: {batch_size}"
-        minibatches_per_epoch = self.cfg.num_batches_per_epoch
+        minibatches_per_epoch = experience_size // batch_size  # self.cfg.num_batches_per_epoch
 
         if minibatches_per_epoch == 1:
             return [None]  # single minibatch is actually the entire buffer, we don't need indices
@@ -566,18 +602,9 @@ class Learner(Configurable):
         mb = buffer[indices]
         return mb
 
-    def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int
-    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+    def _compute_model_outputs(self, mb: TensorDict, num_invalids: int, detach_critic: bool = False):
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
-
-            # PPO clipping
-            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
-            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
-            clip_ratio_low = 1.0 / clip_ratio_high
-            clip_value = self.cfg.ppo_clip_value
-
             valids = mb.valids
 
         # calculate policy head outside of recurrent loop
@@ -678,6 +705,43 @@ class Learner(Configurable):
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
 
+        return dict(
+            action_distribution=action_distribution,
+            result=result,
+            ratio=ratio,
+            adv=adv,
+            adv_std=adv_std,
+            adv_mean=adv_mean,
+            values=values,
+            targets=targets,
+            valids=valids,
+        )
+
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            # PPO clipping
+            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
+            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
+            clip_ratio_low = 1.0 / clip_ratio_high
+            clip_value = self.cfg.ppo_clip_value
+
+            valids = mb.valids
+
+        detach_critic = self.cfg.aux_train and not self.cfg.actor_critic_share_weights
+        model_outputs = self._compute_model_outputs(mb, num_invalids, detach_critic=detach_critic)
+
+        action_distribution = model_outputs["action_distribution"]
+        result = model_outputs["result"]
+        ratio = model_outputs["ratio"]
+        adv = model_outputs["adv"]
+        adv_std = model_outputs["adv_std"]
+        adv_mean = model_outputs["adv_mean"]
+        values = model_outputs["values"]
+        targets = model_outputs["targets"]
+        valids = model_outputs["valids"]
+
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
@@ -699,6 +763,29 @@ class Learner(Configurable):
         )
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+
+    def _aux_calculate_losses(self, mb: AttrDict, num_invalids: int) -> Tuple[ActionDistribution, Tensor, Tensor]:
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            valids = mb.valids
+
+        model_outputs = self._compute_model_outputs(mb, num_invalids)
+
+        result = model_outputs["result"]
+        values = model_outputs["values"]
+        aux_values = result["aux_values"]
+        targets = model_outputs["targets"]
+        valids = model_outputs["valids"]
+
+        with self.timing.add_time("losses"):
+            aux_kl_loss = self._aux_kl_loss(mb.action_logits, result["action_logits"], valids, num_invalids)
+            aux_value_aux_loss = self._aux_value_loss(aux_values, targets, valids, num_invalids)
+            aux_value_true_loss = self._aux_value_loss(values, targets, valids, num_invalids)
+
+        loss_summaries = dict(
+            aux_values=result["aux_values"],
+        )
+
+        return aux_kl_loss, aux_value_aux_loss, aux_value_true_loss, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -875,6 +962,96 @@ class Learner(Configurable):
 
         return stats_and_summaries
 
+    def _aux_train(
+        self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int, with_summaries: bool
+    ):
+        timing = self.timing
+
+        with torch.no_grad():
+            aux_stats_and_summaries: Optional[AttrDict] = None
+
+            # When it is time to record train summaries, we randomly sample epoch/batch for which the summaries are
+            # collected to get equal representation from different stages of training.
+            # Half the time, we record summaries from the very large step of training. There we will have the highest
+            # KL-divergence and ratio of PPO-clipped samples, which makes this data even more useful for analysis.
+            # Something to consider: maybe we should have these last-batch metrics in a separate summaries category?
+            if np.random.rand() < 0.5:
+                summaries_epoch = np.random.randint(0, self.cfg.aux_num_epochs)
+                summaries_batch = np.random.randint(0, self.cfg.num_batches_per_epoch)
+            else:
+                summaries_epoch = self.cfg.aux_num_epochs - 1
+                summaries_batch = self.cfg.num_batches_per_epoch - 1
+
+        for epoch in range(self.cfg.aux_num_epochs):
+            with timing.add_time("aux_epoch_init"):
+                minibatches = self._get_minibatches(batch_size, experience_size)
+
+            for batch_num in range(len(minibatches)):
+                with torch.no_grad(), timing.add_time("aux_minibatch_init"):
+                    indices = minibatches[batch_num]
+
+                    # current minibatch consisting of short trajectory segments with length == recurrence
+                    mb = self._get_minibatch(gpu_buffer, indices)
+
+                    # move cpu buffer to cuda
+                    mb = tensor_dict_to_cuda(mb)
+                    mb["rewards_cpu"] = mb["rewards_cpu"].cpu()
+                    mb["dones_cpu"] = mb["dones_cpu"].cpu()
+
+                    # enable syntactic sugar that allows us to access dict's keys as object attributes
+                    mb = AttrDict(mb)
+
+                    if epoch == 0:
+                        mb_outputs = self._compute_model_outputs(mb, num_invalids)
+                        mb["action_logits"] = mb_outputs["result"]["action_logits"]
+                        del mb_outputs
+
+                with timing.add_time("aux_calculate_losses"):
+                    (
+                        aux_kl_loss,
+                        aux_value_aux_loss,
+                        aux_value_true_loss,
+                        loss_summaries,
+                    ) = self._aux_calculate_losses(mb, num_invalids)
+
+                with timing.add_time("losses_postprocess"):
+                    loss: Tensor = aux_kl_loss + aux_value_aux_loss + aux_value_true_loss
+
+                # update the weights
+                with timing.add_time("aux_update"):
+                    # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
+                    for p in self.actor_critic.parameters():
+                        p.grad = None
+
+                    loss.backward()
+
+                    if self.cfg.max_grad_norm > 0.0:
+                        with timing.add_time("clip"):
+                            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
+
+                    with self.param_server.policy_lock:
+                        self.optimizer.step()
+
+                with torch.no_grad(), timing.add_time("after_optimizer"):
+                    self._after_optimizer_step()
+
+                    # collect and report summaries
+                    should_record_summaries = with_summaries
+                    should_record_summaries &= epoch == summaries_epoch and batch_num == summaries_batch
+                    if should_record_summaries:
+                        # hacky way to collect all of the intermediate variables for summaries
+                        summary_vars = {**locals(), **loss_summaries}
+                        aux_stats_and_summaries = self._aux_record_summaries(AttrDict(summary_vars))
+
+                        del summary_vars
+
+                    # make sure everything (such as policy weights) is committed to shared device memory
+                    synchronize(self.cfg, self.device)
+                    # this will force policy update on the inference worker (policy worker)
+                    self.policy_versions_tensor[self.policy_id] = self.train_step
+
+        return aux_stats_and_summaries
+
     def _record_summaries(self, train_loop_vars) -> AttrDict:
         var = train_loop_vars
 
@@ -953,6 +1130,21 @@ class Learner(Configurable):
         stats.version_diff_avg = version_diff.mean()
         stats.version_diff_min = version_diff.min()
         stats.version_diff_max = version_diff.max()
+
+        for key, value in stats.items():
+            stats[key] = to_scalar(value)
+
+        return stats
+
+    def _aux_record_summaries(self, train_loop_vars) -> AttrDict:
+        var = train_loop_vars
+
+        stats = AttrDict()
+
+        stats.aux_value = var.aux_values.mean()
+        stats.aux_kl_loss = var.aux_kl_loss
+        stats.aux_value_aux_loss = var.aux_value_aux_loss
+        stats.aux_value_true_loss = var.aux_value_true_loss
 
         for key, value in stats.items():
             stats[key] = to_scalar(value)
@@ -1070,6 +1262,18 @@ class Learner(Configurable):
 
             return buff, dataset_size, num_invalids
 
+    def _prepare_aux_batch(self, aux_batches: List[TensorDict]) -> Tuple[TensorDict, int, int]:
+        buffers = []
+        aux_experience_size = 0
+        aux_num_invalids = 0
+        for buff, experience_size, num_invalids in aux_batches:
+            buffers.append(buff)
+            aux_experience_size += experience_size
+            aux_num_invalids += num_invalids
+        aux_buff = cat_tensordicts(buffers)
+
+        return aux_buff, aux_experience_size, aux_num_invalids
+
     def train(self, batch: TensorDict) -> Optional[Dict]:
         if self.cfg.save_milestones_ith > 0 and self.env_steps // self.cfg.save_milestones_ith > self.checkpoint_steps:
             self.save_milestone()
@@ -1082,6 +1286,10 @@ class Learner(Configurable):
         with self.timing.add_time("prepare_batch"):
             buff, experience_size, num_invalids = self._prepare_batch(batch)
 
+            if self.cfg.aux_train:
+                aux_buff = tensor_dict_to_cpu(buff)
+                self.aux_batch.append((aux_buff, experience_size, num_invalids))
+
         if num_invalids >= experience_size:
             if self.cfg.with_pbt:
                 log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
@@ -1091,6 +1299,20 @@ class Learner(Configurable):
         else:
             with self.timing.add_time("train"):
                 train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+
+            if self.cfg.aux_train and len(self.aux_batch) == self.cfg.aux_train_frequency:
+                with self.timing.add_time("aux_train"):
+                    aux_buff, aux_experience_size, aux_num_invalids = self._prepare_aux_batch(self.aux_batch)
+                    aux_train_stats = self._aux_train(
+                        aux_buff, self.cfg.aux_batch_size, aux_experience_size, aux_num_invalids, True
+                    )
+                    # update train stats with aux_train_stats
+                    if aux_train_stats is not None:
+                        if train_stats is not None:
+                            train_stats.update(**aux_train_stats)
+                        else:
+                            train_stats = aux_train_stats
+                    self.aux_batch = []
 
             # multiply the number of samples by frameskip so that FPS metrics reflect the number
             # of environment steps actually simulated
