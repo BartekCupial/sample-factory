@@ -84,7 +84,8 @@ for rollout in [128]:
                     "aux_train_frequency": [8, 16],
                     "aux_kl_loss_coeff": [1.0],
                     "aux_batch_size": [batch_size],
-                    "heartbeat_reporting_interval": [3600],
+                    "heartbeat_interval": [20],
+                    "heartbeat_reporting_interval": [180 * 4],
                 }
             )
 
