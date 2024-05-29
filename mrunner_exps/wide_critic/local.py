@@ -41,7 +41,7 @@ params_grid = [
         "model_path": ["/home/bartek/Workspace/data/sf_checkpoints/amzn-AA-BC/pretrained_use_prev_action"],
         "freeze": [{"actor_encoder": 0}],
         "learning_rate_groups": [{"critic": 0.001, "action_parameterization": 0.1}],
-        "critic_increase_factor": [2],
+        "critic_increase_factor": [0.5],
         "critic_add_layernorm": [True],
         "actor_critic_share_weights": [False],
     },

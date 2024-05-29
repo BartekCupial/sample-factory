@@ -3,6 +3,7 @@ import sys
 from os.path import join
 from typing import Callable
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -22,10 +23,10 @@ from sf_examples.nethack.models import MODELS_LOOKUP
 from sf_examples.nethack.models.kickstarter import KickStarter
 from sf_examples.nethack.models.utils import (
     downscale_input_layer,
-    downscale_output_layer,
     inject_layernorm_before_activation,
     linear_layernorm,
     reduce_input_layer,
+    reduce_output_layer,
     replace_batchnorm_with_layernorm,
     scale_width_critic,
 )
@@ -121,7 +122,7 @@ def load_pretrained_checkpoint_from_shared_weights(
     if cfg.critic_increase_factor != 1:
         factor = cfg.critic_increase_factor
 
-        assert factor % 2 == 0, "Scaling factor should be divisable by 2!"
+        assert factor % 2 == 0 or (1 / factor) % 2 == 0, "Scaling factor should be divisable by 2!"
 
         scale_width_critic(model, factor=factor)
         downscale_input_layer(model.critic_encoder.topline_encoder.msg_fwd, "0", factor)
@@ -129,10 +130,11 @@ def load_pretrained_checkpoint_from_shared_weights(
         downscale_input_layer(model.critic_encoder.screen_encoder.conv_net[0], "0", factor)
         downscale_input_layer(model.critic_encoder.extract_crop_representation, "0", factor)
         # we add one hots and we need to take into account that they arent scaled
-        reduce_input_layer(model.critic_encoder.fc, "0", 121 * (factor - 1))
-        downscale_output_layer(model.critic, "critic_linear", factor)
+        reduce_input_layer(model.critic_encoder.fc, "0", int(np.sign(factor - 1) * np.ceil(np.abs(factor - 1) * 121)))
+        # set critic output to 1
+        reduce_output_layer(model.critic, "critic_linear", model.critic.critic_linear.out_features - 1)
 
-        model.critic_encoder.screen_encoder.out_size *= factor
+        model.critic_encoder.screen_encoder.out_size = int(model.critic_encoder.screen_encoder.out_size * factor)
 
     if cfg.critic_add_layernorm:
         # ensude that we don't modify batchnorm weights in the actor

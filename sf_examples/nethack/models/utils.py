@@ -164,7 +164,9 @@ def scale_width_critic(module, factor=2):
                 setattr(child, name, new_layer)
 
             elif isinstance(subchild, nn.LSTM):
-                new_layer = nn.LSTM(subchild.input_size * factor, subchild.hidden_size * factor, subchild.num_layers)
+                new_layer = nn.LSTM(
+                    int(subchild.input_size * factor), int(subchild.hidden_size * factor), subchild.num_layers
+                )
                 setattr(child, name, new_layer)
 
         scale_width(child, factor=factor)
@@ -200,7 +202,9 @@ def scale_width(module, factor=2):
                 setattr(child, name, new_layer)
 
             elif isinstance(subchild, nn.LSTM):
-                new_layer = nn.LSTM(subchild.input_size * factor, subchild.hidden_size * factor, subchild.num_layers)
+                new_layer = nn.LSTM(
+                    int(subchild.input_size * factor), int(subchild.hidden_size * factor), subchild.num_layers
+                )
                 setattr(child, name, new_layer)
 
         scale_width(child, factor=factor)
@@ -211,7 +215,7 @@ def downscale_input_layer(module, name, factor=2):
 
     if isinstance(cur_layer, (nn.Conv1d, nn.Conv2d)):
         new_layer = cur_layer.__class__(
-            int(cur_layer.in_channels // factor),
+            int(cur_layer.in_channels / factor),
             cur_layer.out_channels,
             kernel_size=cur_layer.kernel_size,
             bias=cur_layer.bias is not None,
@@ -222,7 +226,7 @@ def downscale_input_layer(module, name, factor=2):
         setattr(module, name, new_layer)
     elif isinstance(cur_layer, nn.Linear):
         new_layer = nn.Linear(
-            int(cur_layer.in_features // factor), cur_layer.out_features, bias=cur_layer.bias is not None
+            int(cur_layer.in_features / factor), cur_layer.out_features, bias=cur_layer.bias is not None
         )
         setattr(module, name, new_layer)
 
@@ -233,7 +237,7 @@ def downscale_output_layer(module, name, factor=2):
     if isinstance(cur_layer, (nn.Conv1d, nn.Conv2d)):
         new_layer = cur_layer.__class__(
             cur_layer.in_channels,
-            int(cur_layer.out_channels // factor),
+            int(cur_layer.out_channels / factor),
             kernel_size=cur_layer.kernel_size,
             bias=cur_layer.bias is not None,
             stride=cur_layer.stride,
@@ -243,7 +247,7 @@ def downscale_output_layer(module, name, factor=2):
         setattr(module, name, new_layer)
     elif isinstance(cur_layer, nn.Linear):
         new_layer = nn.Linear(
-            cur_layer.in_features, int(cur_layer.out_features // factor), bias=cur_layer.bias is not None
+            cur_layer.in_features, int(cur_layer.out_features / factor), bias=cur_layer.bias is not None
         )
         setattr(module, name, new_layer)
 
@@ -265,5 +269,26 @@ def reduce_input_layer(module, name, amount=121):
     elif isinstance(cur_layer, nn.Linear):
         new_layer = nn.Linear(
             int(cur_layer.in_features - amount), cur_layer.out_features, bias=cur_layer.bias is not None
+        )
+        setattr(module, name, new_layer)
+
+
+def reduce_output_layer(module, name, amount=121):
+    cur_layer = getattr(module, name)
+
+    if isinstance(cur_layer, (nn.Conv1d, nn.Conv2d)):
+        new_layer = cur_layer.__class__(
+            cur_layer.in_channels,
+            int(cur_layer.out_channels - amount),
+            kernel_size=cur_layer.kernel_size,
+            bias=cur_layer.bias is not None,
+            stride=cur_layer.stride,
+            padding=cur_layer.padding,
+            dilation=cur_layer.dilation,
+        )
+        setattr(module, name, new_layer)
+    elif isinstance(cur_layer, nn.Linear):
+        new_layer = nn.Linear(
+            cur_layer.in_features, int(cur_layer.out_features - amount), bias=cur_layer.bias is not None
         )
         setattr(module, name, new_layer)
