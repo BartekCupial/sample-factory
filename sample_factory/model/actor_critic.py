@@ -213,6 +213,7 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.decoders = [self.actor_decoder, self.critic_decoder]
 
         self.critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
+        self.aux_critic = model_factory.make_model_critic_func(cfg, self.actor_decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
 
         self.encoder_outputs_sizes = []
@@ -305,8 +306,10 @@ class ActorCriticSeparateWeights(ActorCritic):
 
         # first core output corresponds to the actor
         actor_decoder_output = self.actor_decoder(core_outputs[0])
+        aux_values = self.aux_critic(actor_decoder_output).squeeze()
         action_distribution_params, self.last_action_distribution = self.action_parameterization(actor_decoder_output)
 
+        result["aux_values"] = aux_values
         result["action_logits"] = action_distribution_params
 
         self._maybe_sample_actions(sample_actions, result)

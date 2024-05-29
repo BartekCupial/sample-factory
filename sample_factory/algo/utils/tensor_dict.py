@@ -98,6 +98,22 @@ def tensor_dict_to_numpy(d: TensorDict) -> TensorDict:
     return numpy_dict
 
 
+def tensor_dict_to_cpu(d: TensorDict) -> TensorDict:
+    """Returns a cloned tensordict."""
+    d_clone = copy_dict_structure(d)
+    for d1, d2, key, v1, v2 in iter_dicts_recursively(d, d_clone):
+        d2[key] = v1.clone().detach().cpu()
+    return d_clone
+
+
+def tensor_dict_to_cuda(d: TensorDict) -> TensorDict:
+    """Returns a cloned tensordict."""
+    d_clone = copy_dict_structure(d)
+    for d1, d2, key, v1, v2 in iter_dicts_recursively(d, d_clone):
+        d2[key] = v1.cuda()
+    return d_clone
+
+
 def to_numpy(t: Tensor | TensorDict) -> Tensor | TensorDict:
     if isinstance(t, TensorDict):
         return tensor_dict_to_numpy(t)
