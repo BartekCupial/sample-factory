@@ -6,36 +6,40 @@ name = globals()["script"][:-3]
 config = {
     "env": "challenge",
     "exp_tags": [name],
-    "exp_point": "monk-APPO",
-    "train_for_env_steps": 1_000_000,
-    "group": "monk-APPO",
+    "exp_point": "monk-APPO-T",
+    "train_for_env_steps": 500_000_000,
+    "group": "monk-APPO-T",
     "character": "mon-hum-neu-mal",
     "num_workers": 16,
-    "num_envs_per_worker": 2,
+    "num_envs_per_worker": 16,
     "worker_num_splits": 2,
     "rollout": 32,
-    "batch_size": 1024,  # this equals bs = 128, 128 * 32 = 4096
+    "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
     "async_rl": True,
     "serial_mode": False,
-    "use_prev_action": True,
-    "restart_behavior": "overwrite",
-    "dataset_rollout": 32,
-    "dataset_batch_size": 1024,  # this equals bs = 256, 256 * 32 = 8192
-    "run_teacher_hs": False,
+    "wandb_user": "bartekcupial",
+    "wandb_project": "sf2_nethack",
+    "wandb_group": "gmum",
+    "with_wandb": True,
+    "use_pretrained_checkpoint": True,
+    "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "use_prev_action": True,
     "model": "ScaledNet",
     "use_resnet": True,
+    "learning_rate": 0.0001,
     "rnn_size": 1738,
+    "h_dim": 1738,
     "gae_lambda": 0.985,
     "gamma": 1.0,
+    "skip_train": 25_000_000,
+    "save_milestones_ith": 25_000_000,
 }
 
-# params different between exps
 params_grid = []
-expected_batch_size = 256
+expected_batch_size = 4096
 
-for rollout in [32]:
-    for target_batch_size in [32]:
+for rollout in [128]:
+    for target_batch_size in [128]:
         batch_size = min(expected_batch_size, min(target_batch_size * rollout, expected_batch_size * 8))
         batches_to_accumulate = max(1, (rollout * target_batch_size) // expected_batch_size)
         optim_step_every_ith = max(1, batches_to_accumulate // 8)
@@ -44,21 +48,37 @@ for rollout in [32]:
                 {
                     "seed": list(range(1)),
                     "learning_rate": [0.0001],
+                    "freeze": [
+                        {
+                            "actor_encoder": 0,
+                            "actor_core": 0,
+                            "actor_decoder": 0,
+                            "action_parameterization": 0,
+                        }
+                    ],
+                    "unfreeze": [
+                        {
+                            "actor_core": 50_000_000,
+                            "actor_decoder": 50_000_000,
+                            "action_parameterization": 50_000_000,
+                        }
+                    ],
                     "rollout": [rollout],
                     "batch_size": [batch_size],  # 32 * 512, 64 * 256, 128 * 128
                     "num_batches_per_epoch": [min(8, batches_to_accumulate)],
                     "optim_step_every_ith": [optim_step_every_ith],
                     "target_batch_size": [target_batch_size],
-                    "db_path": ["/home/bartek/Workspace/data/nethack/AA-taster/ttyrecs.db"],
-                    "use_pretrained_checkpoint": [True],
-                    "teacher_path": [
-                        "/home/bartek/Workspace/data/sf_checkpoints/amzn-AA-BC/pretrained_use_prev_action"
-                    ],
-                    "model_path": ["/home/bartek/Workspace/data/sf_checkpoints/amzn-AA-BC/pretrained_use_prev_action"],
-                    "freeze": [{"actor_encoder": 0}],
                     "actor_critic_share_weights": [False],
-                    "learning_rate_groups": [{"critic": 0.001, "action_parameterization": 0.1}],
-                    "aux_train": [True],
+                    "critic_add_layernorm": [False],
+                    "critic_replace_bn_with_ln": [True],
+                    "learning_rate_groups": [
+                        {
+                            "actor_encoder": actor_learning_rate,
+                            "actor_core": actor_learning_rate,
+                            "actor_decoder": actor_learning_rate,
+                            "action_parameterization": actor_learning_rate,
+                        }
+                    ],
                     "aux_num_epochs": [3, 6, 9],
                     "aux_train_frequency": [8, 16],
                     "aux_kl_loss_coeff": [1.0],

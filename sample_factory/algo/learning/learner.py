@@ -1017,20 +1017,21 @@ class Learner(Configurable):
                 with timing.add_time("losses_postprocess"):
                     loss: Tensor = aux_kl_loss + aux_value_aux_loss + aux_value_true_loss
 
-                # update the weights
-                with timing.add_time("aux_update"):
-                    # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
-                    for p in self.actor_critic.parameters():
-                        p.grad = None
+                if self.env_steps >= self.cfg.warmup:
+                    # update the weights
+                    with timing.add_time("aux_update"):
+                        # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
+                        for p in self.actor_critic.parameters():
+                            p.grad = None
 
-                    loss.backward()
+                        loss.backward()
 
-                    if self.cfg.max_grad_norm > 0.0:
-                        with timing.add_time("clip"):
-                            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
+                        if self.cfg.max_grad_norm > 0.0:
+                            with timing.add_time("clip"):
+                                torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
 
-                    with self.param_server.policy_lock:
-                        self.optimizer.step()
+                        with self.param_server.policy_lock:
+                            self.optimizer.step()
 
                 with torch.no_grad(), timing.add_time("after_optimizer"):
                     self._after_optimizer_step()
