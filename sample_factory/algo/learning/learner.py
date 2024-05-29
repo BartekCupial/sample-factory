@@ -31,6 +31,7 @@ from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
+from sf_examples.nethack.models.kickstarter import KickStarter
 
 
 class LearningRateScheduler:
@@ -225,13 +226,18 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
+        if isinstance(self.actor_critic, KickStarter):
+            trained_model = self.actor_critic.student
+        else:
+            trained_model = self.actor_critic
+
         if self.cfg.learning_rate_groups is not None:
-            all_parameters = set(self.actor_critic.parameters())
+            all_parameters = set(trained_model.parameters())
             custom_lr_parameters = set()
 
             params = [
                 {
-                    "params": list(getattr(self.actor_critic, name).parameters()),
+                    "params": list(getattr(trained_model, name).parameters()),
                     "lr": value,
                 }
                 for name, value in self.cfg.learning_rate_groups.items()
@@ -249,7 +255,7 @@ class Learner(Configurable):
                 default_lr = self.cfg.learning_rate  # Set your default learning rate here
                 params.append({"params": default_lr_parameters, "lr": default_lr})
         else:
-            params = list(self.actor_critic.parameters())
+            params = list(trained_model.parameters())
 
         optimizer_cls = dict(
             sgd=torch.optim.SGD,

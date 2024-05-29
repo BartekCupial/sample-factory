@@ -39,8 +39,10 @@ params_grid = [
         "use_pretrained_checkpoint": [True],
         "teacher_path": ["/home/bartek/Workspace/data/sf_checkpoints/amzn-AA-BC/pretrained_use_prev_action"],
         "model_path": ["/home/bartek/Workspace/data/sf_checkpoints/amzn-AA-BC/pretrained_use_prev_action"],
-        "freeze": [{"encoder": 0}],
+        "freeze": [{"actor_encoder": 0}],
+        "actor_critic_share_weights": [False],
         "learning_rate_groups": [{"critic": 0.001, "action_parameterization": 0.1}],
+        "kickstarting_loss_coeff": [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01],
     },
 ]
 
