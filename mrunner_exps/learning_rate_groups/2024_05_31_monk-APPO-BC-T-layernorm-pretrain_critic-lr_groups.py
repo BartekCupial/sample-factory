@@ -6,9 +6,9 @@ name = globals()["script"][:-3]
 config = {
     "env": "challenge",
     "exp_tags": [name],
-    "exp_point": "monk-APPO-KS-T",
+    "exp_point": "monk-APPO-BC-T",
     "train_for_env_steps": 500_000_000,
-    "group": "monk-APPO-KS-T",
+    "group": "monk-APPO-BC-T",
     "character": "mon-hum-neu-mal",
     "num_workers": 16,
     "num_envs_per_worker": 16,
@@ -21,9 +21,12 @@ config = {
     "wandb_project": "sf2_nethack",
     "wandb_group": "gmum",
     "with_wandb": True,
+    "use_dataset": True,
+    "dataset_rollout": 32,
+    "dataset_batch_size": 4096,  # this equals bs = 256, 256 * 32 = 8192
     "use_pretrained_checkpoint": True,
     "model_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
-    "kickstarting_loss_coeff": 0.5,
+    "distillation_loss_coeff": 0.5,
     "teacher_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/amzn-AA-BC_pretrained",
     "run_teacher_hs": False,
     "use_prev_action": True,
@@ -67,7 +70,9 @@ for rollout in [128]:
                         }
                     ],
                     "rollout": [rollout],
+                    "dataset_rollout": [rollout],
                     "batch_size": [batch_size],  # 32 * 512, 64 * 256, 128 * 128
+                    "dataset_batch_size": [batch_size],  # 32 * 512, 64 * 256, 128 * 128
                     "num_batches_per_epoch": [min(8, batches_to_accumulate)],
                     "optim_step_every_ith": [optim_step_every_ith],
                     "target_batch_size": [target_batch_size],
@@ -83,7 +88,7 @@ for rollout in [128]:
                         }
                     ],
                     "gae_lambda": [0.992],
-                    "kickstarting_loss_coeff": [2.0, 1.0, 0.7, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01],
+                    "distillation_loss_coeff": [2.0, 1.0, 0.7, 0.5, 0.3, 0.2],
                 }
             )
 
