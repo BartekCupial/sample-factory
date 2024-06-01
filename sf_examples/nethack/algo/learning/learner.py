@@ -23,7 +23,7 @@ from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import log
 from sf_examples.nethack.datasets.actions import ACTION_MAPPING
-from sf_examples.nethack.datasets.dataset import load_nld_aa_large_dataset
+from sf_examples.nethack.datasets.dataset import get_dataset_scores, load_nld_aa_large_dataset
 from sf_examples.nethack.datasets.render import render_screen_image
 from sf_examples.nethack.datasets.roles import Alignment, Race, Role
 from sf_examples.nethack.models.kickstarter import KickStarter
@@ -68,9 +68,10 @@ class DatasetLearner(Learner):
 
             dataset_batch_size = self.cfg.dataset_batch_size // self.cfg.dataset_rollout
             self.dataset = self._get_dataset()
+            self.dataset_scores = self._get_dataset_scores()
             self.tp = ThreadPoolExecutor(max_workers=self.cfg.dataset_num_workers)
 
-            def _make_sing_iter(dataset):
+            def _make_sing_iter(dataset, dataset_scores):
                 dataset = iter(dataset)
 
                 def _iter():
@@ -101,6 +102,12 @@ class DatasetLearner(Learner):
                         batch["done"][np.where(timestamp_diff != 1)] = 1
                         prev_timestamps = np.expand_dims(batch["timestamps"][:, -1].copy(), -1)
 
+                        # add reward to go
+                        reward_to_go = (
+                            dataset_scores[batch["gameids"].flatten()].reshape(batch["gameids"].shape) - batch["scores"]
+                        )
+                        batch["reward_to_go"] = reward_to_go
+
                         # ensure that we don't overrite data
                         normalized_batch = prepare_and_normalize_obs(self.actor_critic, batch)
                         normalized_batch = clone_tensordict(TensorDict(normalized_batch))
@@ -119,27 +126,28 @@ class DatasetLearner(Learner):
             self._iterators = []
             self._results = []
             for _ in range(self.cfg.dataset_num_splits):
-                it = _make_sing_iter(self.dataset)
+                it = _make_sing_iter(self.dataset, self.dataset_scores)
                 self._iterators.append(it)
                 self._results.append(self.tp.submit(next, it))
 
         use_supervised_loss = self.cfg.supervised_loss_coeff > 0.0
         use_distillation_loss = self.cfg.distillation_loss_coeff > 0.0
         use_kickstarting_loss = self.cfg.kickstarting_loss_coeff > 0.0
+        use_sil_loss = self.cfg.sil_loss_coeff > 0.0
 
         assert (
             sum(
                 [
                     use_supervised_loss,
                     use_distillation_loss,
-                    use_kickstarting_loss,
+                    use_sil_loss,
                 ]
             )
             <= 1
         ), "only one regularization loss allowed at the time"
 
         assert (
-            use_supervised_loss or use_distillation_loss or self.cfg.calc_accuracy
+            use_supervised_loss or use_distillation_loss or use_sil_loss or self.cfg.calc_accuracy
         ) == self.cfg.use_dataset, (
             "If either 'use_supervised_loss' or 'use_distillation_loss' is true, then 'use_dataset' must also be true."
         )
@@ -147,6 +155,7 @@ class DatasetLearner(Learner):
         self.supervised_loss_func = self._supervised_loss if use_supervised_loss else lambda *_: 0.0
         self.distillation_loss_func = self._distillation_loss if use_distillation_loss else lambda *_: 0.0
         self.kickstarting_loss_func = self._kickstarting_loss if use_kickstarting_loss else lambda *_: 0.0
+        self.sil_loss_func = self._sil_loss if use_sil_loss else lambda *_: (0.0, 0.0)
         self.calc_accuracy_func = self._calc_accuracy if self.cfg.calc_accuracy else lambda *_: 0.0
 
         return init_model_data
@@ -170,6 +179,16 @@ class DatasetLearner(Learner):
         )
 
         return dataset
+
+    def _get_dataset_scores(self):
+        dataset_scores = get_dataset_scores(self.cfg.dataset_name, self.cfg.db_path)
+
+        gameids = np.array(list(map(int, dataset_scores.keys()))).max()
+        max_scores = np.zeros(gameids + 1)
+        for key, value in dataset_scores.items():
+            max_scores[int(key)] = value
+
+        return max_scores
 
     def result(self):
         return self._results[self.idx].result()
@@ -260,6 +279,30 @@ class DatasetLearner(Learner):
         kickstarting_loss = kickstarting_loss.mean()
 
         return kickstarting_loss
+
+    def _sil_loss(self, mb_results, mb, num_invalids: int):
+        values = mb_results["values"].flatten(0, 1)
+        targets = mb["reward_to_go"].flatten(0, 1).clone()
+
+        self.actor_critic.train(False)  # we set
+        self.actor_critic.returns_normalizer(targets)  # inplace
+        self.actor_critic.train(True)
+
+        value_loss = F.relu(targets - values).pow(2)
+        value_loss = value_loss.mean()
+
+        value_loss *= self.cfg.sil_loss_coeff * self.cfg.sil_beta_coeff
+
+        action_logits = F.log_softmax(mb_results["action_logits"].flatten(0, 1), dim=-1)
+        actions = mb["actions"].flatten(0, 1).unsqueeze(-1).long()
+        log_prob_actions = torch.gather(action_logits, 1, actions).squeeze(-1)
+        adv = torch.clamp(F.relu(targets - values), 0, self.cfg.sil_clip_coeff).detach()
+        policy_loss = -log_prob_actions * adv
+        policy_loss = policy_loss.mean()
+
+        policy_loss *= self.cfg.sil_loss_coeff
+
+        return policy_loss, 0.5 * value_loss
 
     def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
         with torch.no_grad(), self.timing.add_time("losses_init"):
@@ -459,6 +502,13 @@ class DatasetLearner(Learner):
                 dataset_num_invalids,
             )
 
+        with self.timing.add_time("sil_loss"):
+            sil_policy_loss, sil_value_loss = self.sil_loss_func(
+                dataset_mb_results,
+                dataset_mb,
+                dataset_num_invalids,
+            )
+
         action_distribution = (
             action_distribution if action_distribution is not None else self.actor_critic.action_distribution()
         )
@@ -471,11 +521,13 @@ class DatasetLearner(Learner):
             adv_std=adv_std,
             adv_mean=adv_mean,
         )
-        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss
+        regularizer_loss = supervised_loss + distillation_loss + kickstarting_loss + sil_policy_loss + sil_value_loss
         regularizer_loss_summaries = dict(
             supervised_loss=to_scalar(supervised_loss),
             distillation_loss=to_scalar(distillation_loss),
             kickstarting_loss=to_scalar(kickstarting_loss),
+            sil_policy_loss=to_scalar(sil_policy_loss),
+            sil_value_loss=to_scalar(sil_value_loss),
             accuracy=to_scalar(accuracy),
         )
 

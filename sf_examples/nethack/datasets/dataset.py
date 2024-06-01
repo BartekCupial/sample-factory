@@ -86,3 +86,17 @@ def build_dataset_sql_query(
     subselect_sql = subselect_sql[:-5]
 
     return subselect_sql, subselect_sql_args
+
+
+def get_dataset_scores(dataset_name, dbfilename=nld.db.DB):
+    sql_args = (dataset_name,)
+
+    sql = """
+    SELECT games.gameid, games.points
+    FROM games
+    INNER JOIN datasets ON games.gameid=datasets.gameid
+    WHERE datasets.dataset_name=?"""
+
+    with nld.db.connect(dbfilename) as conn:
+        scores = dict(list(conn.execute(sql, sql_args)))
+    return scores
