@@ -151,7 +151,8 @@ class ModelCoreRNN(ModelCore):
                 relative_timesteps=cfg.nanogpt_relative_timesteps,
                 context_len=cfg.rollout,
                 constant_context=cfg.nanogpt_constant_context,
-
+                attention_type=cfg.nanogpt_attention_type,
+                two_layer_norms=cfg.nanogpt_two_layer_norms,
             )
             self.core = GPT(GPT_cfg)
 

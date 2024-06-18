@@ -634,7 +634,18 @@ def add_model_args(p: ArgumentParser):
         choices=["table", "sine", "rope", "linear"],
     )
     p.add_argument(
+        "--nanogpt_attention_type",
+        default="softmax",
+        type=str,
+        choices=["softmax", "linear"],
+    )
+    p.add_argument(
         "--nanogpt_constant_context",
+        default=True,
+        type=str2bool,
+    )
+    p.add_argument(
+        "--nanogpt_two_layer_norms",
         default=True,
         type=str2bool,
     )

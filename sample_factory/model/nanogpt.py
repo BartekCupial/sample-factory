@@ -85,6 +85,7 @@ class CausalSelfAttention(nn.Module):
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         self.context_len = config.context_len
+        self.softmax_attention = config.attention_type == "softmax"
 
         bias = torch.tril(torch.ones(config.block_size, config.block_size))
         if config.constant_context:
@@ -139,7 +140,8 @@ class CausalSelfAttention(nn.Module):
                 full_mask = causal_mask
 
             att = att.masked_fill(torch.logical_not(full_mask), float('-inf'))
-            att = F.softmax(att, dim=-1)
+            if self.softmax_attention:
+                att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -171,7 +173,7 @@ class Block(nn.Module):
         super().__init__()
 
         if use_layer_norm:
-            self.ln_1 = LayerNorm(config.d_model, bias=config.bias)
+            self.ln_1 = LayerNorm(config.d_model, bias=config.bias) if config.two_layer_norms else nn.Identity()
             self.ln_2 = LayerNorm(config.d_model, bias=config.bias)
         else:
             self.ln_1 = nn.Identity()
@@ -200,6 +202,8 @@ class GPTConfig:
     embedding_type: str = "table"  # table, linear, rope, sine
     relative_timesteps: bool = True  # use absolute timestep idx or relative (t=0 is start of the trajectory vs t=0 is the start of the chunk)
     constant_context: bool = True
+    attention_type: str = "softmax"  # softmax, linear
+    two_layer_norms: bool = True
 
 class GPT(nn.Module):
 

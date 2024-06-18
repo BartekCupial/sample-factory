@@ -470,7 +470,6 @@ class DatasetLearner(Learner):
         with self.timing.add_time("prepare_dataset_batch"):
             if self.cfg.use_dataset:
                 dataset_mb = self._get_dataset_minibatch()
-                self.actor_critic.eval()
                 if self.cfg.process_seq_in_batch_mode:
                     dataset_mb_results, valids, new_rnn_state = self._calculate_dataset_outputs_batch(dataset_mb)
                 else:
