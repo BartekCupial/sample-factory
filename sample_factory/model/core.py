@@ -155,7 +155,40 @@ class ModelCoreRNN(ModelCore):
                 two_layer_norms=cfg.nanogpt_two_layer_norms,
             )
             self.core = GPT(GPT_cfg)
+        elif cfg.rnn_type == "xlstm":
+            from xlstm import (
+                xLSTMBlockStack,
+                xLSTMBlockStackConfig,
+                mLSTMBlockConfig,
+                mLSTMLayerConfig,
+                sLSTMBlockConfig,
+                sLSTMLayerConfig,
+                FeedForwardConfig,
+            )
 
+            cfg = xLSTMBlockStackConfig(
+                mlstm_block=mLSTMBlockConfig(
+                    mlstm=mLSTMLayerConfig(
+                        conv1d_kernel_size=4, qkv_proj_blocksize=4, num_heads=4
+                    )
+                ),
+                slstm_block=sLSTMBlockConfig(
+                    slstm=sLSTMLayerConfig(
+                        backend="vanilla",
+                        num_heads=4,
+                        conv1d_kernel_size=4,
+                        bias_init="powerlaw_blockdependent",
+                    ),
+                    feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
+                ),
+                context_length=256,
+                num_blocks=cfg.rnn_num_layers,
+                embedding_dim=cfg.nanogpt_model_size,
+                slstm_at=[1],
+
+            )
+
+            self.core = xLSTMBlockStack(cfg)
 
         else:
             raise RuntimeError(f"Unknown RNN type {cfg.rnn_type}")

@@ -920,6 +920,8 @@ class Learner(Configurable):
         adam_max_second_moment = 0.0
         for key, tensor_state in self.optimizer.state.items():
             if "exp_avg_sq" in tensor_state:
+                if tensor_state["exp_avg_sq"].dtype in [torch.complex64, torch.complex128]:
+                    continue
                 adam_max_second_moment = max(tensor_state["exp_avg_sq"].max().item(), adam_max_second_moment)
         stats.adam_max_second_moment = adam_max_second_moment
 
