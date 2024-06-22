@@ -14,7 +14,7 @@ config = {
     "load_checkpoint_kind": "latest",
     "train_dir": "/home/bartek/Workspace/ideas/sample-factory/train_dir",
     "experiment": "amzn-AA-BC_pretrained",
-    "sample_env_episodes": 20,
+    "sample_env_episodes": 64,
     "num_workers": 16,
     "num_envs_per_worker": 1,
     "worker_num_splits": 1,
@@ -23,7 +23,7 @@ config = {
 
 csv_folder_name = f"{config['character']}_episodes{config['sample_env_episodes']}"
 train_dir = "train_dir"
-experiment = "monk-AA-BC_pretrained_use_prev_action"
+experiment = "amzn-AA-BC_pretrained"
 
 # params different between exps
 params_grid = [

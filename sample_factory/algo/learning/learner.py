@@ -31,6 +31,7 @@ from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
+from sf_examples.nethack.models.kickstarter import KickStarter
 
 
 class LearningRateScheduler:
@@ -225,7 +226,36 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        if isinstance(self.actor_critic, KickStarter):
+            trained_model = self.actor_critic.student
+        else:
+            trained_model = self.actor_critic
+
+        if self.cfg.learning_rate_groups is not None:
+            all_parameters = set(trained_model.parameters())
+            custom_lr_parameters = set()
+
+            params = [
+                {
+                    "params": list(getattr(trained_model, name).parameters()),
+                    "lr": value,
+                }
+                for name, value in self.cfg.learning_rate_groups.items()
+            ]
+
+            # Add the parameters with custom learning rates to the set
+            for p in params:
+                custom_lr_parameters.update(p["params"])
+
+            # Determine the remaining parameters that do not have a custom learning rate
+            default_lr_parameters = list(all_parameters - custom_lr_parameters)
+
+            # If there are any remaining parameters, add them with the default learning rate
+            if default_lr_parameters:
+                default_lr = self.cfg.learning_rate  # Set your default learning rate here
+                params.append({"params": default_lr_parameters, "lr": default_lr})
+        else:
+            params = list(trained_model.parameters())
 
         optimizer_cls = dict(
             sgd=torch.optim.SGD,
@@ -259,7 +289,7 @@ class Learner(Configurable):
 
         self.lr_scheduler = get_lr_scheduler(self.cfg)
         self.curr_lr = self.cfg.learning_rate if self.curr_lr is None else self.curr_lr
-        self._apply_lr(self.curr_lr)
+        # self._apply_lr(self.curr_lr) # TODO: turned off becase schedulers doesn't support setting lr for param groups
 
         self.is_initialized = True
 
@@ -299,7 +329,7 @@ class Learner(Configurable):
             self.train_step = checkpoint_dict["train_step"]
             self.env_steps = checkpoint_dict["env_steps"]
             self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
-        self.actor_critic.load_state_dict(checkpoint_dict["model"])
+        self.actor_critic.load_state_dict(checkpoint_dict["model"], strict=False)
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
 
@@ -881,11 +911,13 @@ class Learner(Configurable):
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()
 
-        if "adv_mean" in stats:
+        if "adv_mean" in var:
             stats.adv_min = var.mb.advantages.min()
             stats.adv_max = var.mb.advantages.max()
             stats.adv_std = var.adv_std
             stats.adv_mean = var.adv_mean
+            stats.adv_mean_norm = var.adv.mean()
+            stats.adv_std_norm = var.adv.std()
 
         stats.max_abs_logprob = torch.abs(var.mb.action_logits).max()
 

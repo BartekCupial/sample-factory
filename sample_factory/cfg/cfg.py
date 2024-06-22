@@ -1,3 +1,4 @@
+import ast
 import multiprocessing
 import os
 from argparse import ArgumentParser
@@ -655,9 +656,15 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--decoder_mlp_layers",
         default=[512, 512],
-        type=int,
+        type=ast.literal_eval,
         nargs="*",
         help="Optional decoder MLP layers after the policy core. If empty (default) decoder is identity function.",
+    )
+    p.add_argument(
+        "--critic_mlp_layers",
+        default=[],
+        type=ast.literal_eval,
+        help="Optional critic MLP layers after the policy core. If empty (default) critic is a linear function.",
     )
 
     p.add_argument(

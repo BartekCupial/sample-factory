@@ -93,7 +93,7 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         penalty_mode=cfg.fn_penalty_step,
         savedir=cfg.savedir,
         save_ttyrec_every=cfg.save_ttyrec_every,
-        gameloaddir=gameloaddir,
+        # gameloaddir=gameloaddir,
     )
     if env_name == "challenge":
         kwargs["no_progress_timeout"] = 150

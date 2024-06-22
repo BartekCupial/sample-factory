@@ -150,7 +150,7 @@ class ActorCriticSharedWeights(ActorCritic):
 
         decoder_out_size: int = self.decoder.get_out_size()
 
-        self.critic_linear = nn.Linear(decoder_out_size, 1)
+        self.critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
 
         self.apply(self.initialize_weights)
@@ -165,7 +165,7 @@ class ActorCriticSharedWeights(ActorCritic):
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
         decoder_output = self.decoder(core_output)
-        values = self.critic_linear(decoder_output).squeeze()
+        values = self.critic(decoder_output).squeeze()
 
         result = TensorDict(values=values)
         if values_only:
@@ -212,8 +212,12 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.critic_decoder = model_factory.make_model_decoder_func(cfg, self.critic_core.get_out_size())
         self.decoders = [self.actor_decoder, self.critic_decoder]
 
-        self.critic_linear = nn.Linear(self.critic_decoder.get_out_size(), 1)
+        self.critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
+
+        self.encoder_outputs_sizes = []
+        self.rnn_hidden_sizes = []
+        self.core_outputs_sizes = []
 
         self.apply(self.initialize_weights)
 
@@ -224,7 +228,10 @@ class ActorCriticSeparateWeights(ActorCritic):
         """
         num_cores = len(self.cores)
 
-        rnn_states_split = rnn_states.chunk(num_cores, dim=1)
+        # times 2 because we need hidden and cell
+        # TODO: handle GRU
+        self.rnn_hidden_sizes = [core.core.hidden_size * 2 for core in self.cores]
+        rnn_states_split = rnn_states.split(self.rnn_hidden_sizes, dim=1)
 
         if isinstance(head_output, PackedSequence):
             # We cannot chunk PackedSequence directly, we first have to to unpack it,
@@ -233,7 +240,8 @@ class ActorCriticSeparateWeights(ActorCritic):
             # but this time using concatenation - unpack, cat and pack.
 
             unpacked_head_output, lengths = pad_packed_sequence(head_output)
-            unpacked_head_output_split = unpacked_head_output.chunk(num_cores, dim=2)
+            unpacked_head_output_split = unpacked_head_output.split(self.encoder_outputs_sizes, dim=2)
+            # unpacked_head_output_split = unpacked_head_output.chunk(num_cores, dim=2)
             head_outputs_split = [
                 pack_padded_sequence(unpacked_head_output_split[i], lengths, enforce_sorted=False)
                 for i in range(num_cores)
@@ -249,8 +257,8 @@ class ActorCriticSeparateWeights(ActorCritic):
             unpacked_outputs = torch.cat(unpacked_outputs, dim=2)
             outputs = pack_padded_sequence(unpacked_outputs, lengths, enforce_sorted=False)
         else:
-            head_outputs_split = head_output.chunk(num_cores, dim=1)
-            rnn_states_split = rnn_states.chunk(num_cores, dim=1)
+            head_outputs_split = head_output.split(self.encoder_outputs_sizes, dim=1)
+            # head_outputs_split = head_output.chunk(num_cores, dim=1)
 
             outputs, new_rnn_states = [], []
             for i, c in enumerate(self.cores):
@@ -258,6 +266,7 @@ class ActorCriticSeparateWeights(ActorCritic):
                 outputs.append(output)
                 new_rnn_states.append(new_rnn_state)
 
+            self.core_outputs_sizes = [out.shape[-1] for out in outputs]
             outputs = torch.cat(outputs, dim=1)
 
         new_rnn_states = torch.cat(new_rnn_states, dim=1)
@@ -274,17 +283,20 @@ class ActorCriticSeparateWeights(ActorCritic):
         for enc in self.encoders:
             head_outputs.append(enc(normalized_obs_dict))
 
+        self.encoder_outputs_sizes = [out.shape[-1] for out in head_outputs]
+
         return torch.cat(head_outputs, dim=1)
 
     def forward_core(self, head_output, rnn_states):
         return self.core_func(head_output, rnn_states)
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        core_outputs = core_output.chunk(len(self.cores), dim=1)
+        core_outputs = core_output.split(self.core_outputs_sizes, dim=1)
+        # core_outputs = core_output.chunk(len(self.cores), dim=1)
 
         # second core output corresponds to the critic
         critic_decoder_output = self.critic_decoder(core_outputs[1])
-        values = self.critic_linear(critic_decoder_output).squeeze()
+        values = self.critic(critic_decoder_output).squeeze()
 
         result = TensorDict(values=values)
         if values_only:

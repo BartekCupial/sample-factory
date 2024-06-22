@@ -24,7 +24,6 @@ _nethack_deps = [
     "shimmy",
     "tqdm ~= 4.66",
     "debugpy ~= 1.6",
-    "nle @ git+https://github.com/BartekCupial/nle.git",
 ]
 
 _docs_deps = [

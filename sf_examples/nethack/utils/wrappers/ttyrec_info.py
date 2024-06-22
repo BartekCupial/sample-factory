@@ -5,7 +5,7 @@ import gym
 
 class TtyrecInfoWrapper(gym.Wrapper):
     def step(self, action):
-        ttyrec = self.env.unwrapped.gym_env.nethack._ttyrec
+        ttyrec = self.env.unwrapped.nethack._ttyrec
         obs, reward, done, info = self.env.step(action)
 
         if done:

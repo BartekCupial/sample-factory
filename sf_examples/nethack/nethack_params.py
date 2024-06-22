@@ -21,8 +21,8 @@ def add_extra_params_nethack_env(parser):
     p.add_argument("--add_image_observation", type=str2bool, default=True)
     p.add_argument("--crop_dim", type=int, default=18)
     p.add_argument("--pixel_size", type=int, default=6)
-    p.add_argument("--reward_shaping", type=bool, default=False)
     p.add_argument("--process_seq_in_batch_mode", type=str2bool, default=False)
+    p.add_argument("--reward_shaping", type=str2bool, default=False)
 
 
 def add_extra_params_model(parser):
@@ -62,6 +62,7 @@ def add_extra_params_learner(parser):
     # TODO: add help
     p = parser
     p.add_argument("--use_dataset", type=str2bool, default=False)
+    p.add_argument("--calc_accuracy", type=str2bool, default=False)
     p.add_argument("--behavioral_clone", type=str2bool, default=False)
     p.add_argument("--data_path", type=str, default="/nle/nld-aa/nle_data")
     p.add_argument("--db_path", type=str, default="/ttyrecs/ttyrecs.db")
@@ -115,6 +116,11 @@ def add_extra_params_general(parser):
     p.add_argument("--skip_train", type=int, default=-1)
     p.add_argument("--target_batch_size", type=int, default=128)
     p.add_argument("--optim_step_every_ith", type=int, default=1)
+    p.add_argument("--clip_adv", type=float, default=None)
+    p.add_argument("--critic_add_layernorm", type=ast.literal_eval, default=False)
+    p.add_argument("--critic_replace_bn_with_ln", type=ast.literal_eval, default=True)
+    p.add_argument("--learning_rate_groups", type=ast.literal_eval, default=None)
+    p.add_argument("--critic_increase_factor", type=float, default=1)
 
 
 def nethack_override_defaults(_env, parser):

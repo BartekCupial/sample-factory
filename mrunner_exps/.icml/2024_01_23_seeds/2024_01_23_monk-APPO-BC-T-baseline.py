@@ -38,7 +38,7 @@ config = {
     "exploration_loss_coeff": 0.0,
     "gamma": 1.0,
     "skip_train": 25_000_000,
-    "lr_schedule": "linear_decay",
+    "save_milestones_ith": 25_000_000,
 }
 
 # params different between exps

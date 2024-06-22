@@ -9,6 +9,15 @@ nle/
 minihack
 notebooks/
 artifacts/
+sf_examples/atari/
+sf_examples/brax/
+sf_examples/dmlab/
+sf_examples/envpool/
+sf_examples/isaacgym_examples/
+sf_examples/mujoco/
+sf_examples/notebooks/
+sf_examples/sampler/
+sf_examples/vizdoom/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
