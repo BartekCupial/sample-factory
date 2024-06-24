@@ -657,7 +657,6 @@ def add_model_args(p: ArgumentParser):
         "--decoder_mlp_layers",
         default=[512, 512],
         type=ast.literal_eval,
-        nargs="*",
         help="Optional decoder MLP layers after the policy core. If empty (default) decoder is identity function.",
     )
     p.add_argument(
