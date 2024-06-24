@@ -916,8 +916,6 @@ class Learner(Configurable):
             stats.adv_max = var.mb.advantages.max()
             stats.adv_std = var.adv_std
             stats.adv_mean = var.adv_mean
-            stats.adv_mean_norm = var.adv.mean()
-            stats.adv_std_norm = var.adv.std()
 
         stats.max_abs_logprob = torch.abs(var.mb.action_logits).max()
 
