@@ -90,37 +90,34 @@ def _tile_characters_to_image(
 
 def _initialize_char_array(font_size, rescale_font_size):
     """Draw all characters in PIL and cache them in numpy arrays
+
     if rescale_font_size is given, assume it is (width, height)
+
     Returns a np array of (num_chars, num_colors, char_height, char_width, 3)
     """
     font = ImageFont.truetype(SMALL_FONT_PATH, font_size)
     dummy_text = "".join([(chr(i) if chr(i).isprintable() else " ") for i in range(256)])
-    bboxes = np.array([font.getbbox(char) for char in dummy_text])
-    image_width = bboxes[:, 2].max()
-    image_height = bboxes[:, 3].max()
+    _, _, image_width, image_height = font.getbbox(dummy_text)
+    # Above can not be trusted (or its siblings)....
+    image_width = int(np.ceil(image_width / 256) * 256)
 
     char_width = rescale_font_size[0]
     char_height = rescale_font_size[1]
+
     char_array = np.zeros((256, 16, char_height, char_width, 3), dtype=np.uint8)
-
+    image = Image.new("RGB", (image_width, image_height))
+    image_draw = ImageDraw.Draw(image)
     for color_index in range(16):
+        image_draw.rectangle((0, 0, image_width, image_height), fill=(0, 0, 0))
+        image_draw.text((0, 0), dummy_text, fill=COLORS[color_index], spacing=0)
+
+        arr = np.array(image).copy()
+        arrs = np.array_split(arr, 256, axis=1)
         for char_index in range(256):
-            char = dummy_text[char_index]
-
-            image = Image.new("RGB", (image_width, image_height))
-            image_draw = ImageDraw.Draw(image)
-            image_draw.rectangle((0, 0, image_width, image_height), fill=(0, 0, 0))
-
-            _, _, width, height = font.getbbox(char)
-            x = (image_width - width) // 2
-            y = (image_height - height) // 2
-            image_draw.text((x, y), char, font=font, fill=COLORS[color_index])
-
-            arr = np.array(image).copy()
+            char = arrs[char_index]
             if rescale_font_size:
-                arr = cv2.resize(arr, rescale_font_size, interpolation=cv2.INTER_AREA)
-            char_array[char_index, color_index] = arr
-
+                char = cv2.resize(char, rescale_font_size, interpolation=cv2.INTER_AREA)
+            char_array[char_index, color_index] = char
     return char_array
 
 
@@ -220,7 +217,6 @@ class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):
         font_size=9,
         crop_size=12,
         rescale_font_size=(6, 6),
-        render_font_size=(6, 11),
     ):
         super().__init__(env)
         self.char_array = _initialize_char_array(font_size, rescale_font_size)
@@ -250,10 +246,6 @@ class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):
         )
         self.observation_space = gym.spaces.Dict(obs_spaces)
 
-        self.render_char_array = _initialize_char_array(font_size, render_font_size)
-        self.render_char_array = self.render_char_array.transpose(0, 1, 4, 2, 3)
-        self.render_char_array = np.ascontiguousarray(self.render_char_array)
-
     def _populate_obs(self, obs):
         screen = np.zeros(self.chw_image_shape, order="C", dtype=np.uint8)
         render_utils.render_crop(
@@ -275,35 +267,3 @@ class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):
         obs = self.env.reset(**kwargs)
         self._populate_obs(obs)
         return obs
-
-    def render(self, mode="human"):
-        if mode == "rgb_array":
-            if not self.unwrapped.last_observation:
-                return
-
-            # TODO: we don't crop but additionally we could show what model sees
-            obs = self.unwrapped.last_observation
-            tty_chars = obs[self.unwrapped._observation_keys.index("tty_chars")]
-            tty_colors = obs[self.unwrapped._observation_keys.index("tty_colors")]
-
-            chw_image_shape = (
-                3,
-                nethack.nethack.TERMINAL_SHAPE[0] * self.render_char_array.shape[3],
-                nethack.nethack.TERMINAL_SHAPE[1] * self.render_char_array.shape[4],
-            )
-            out_image = np.zeros(chw_image_shape, dtype=np.uint8)
-
-            _tile_characters_to_image(
-                out_image=out_image,
-                chars=tty_chars,
-                colors=tty_colors,
-                output_height_chars=nethack.nethack.TERMINAL_SHAPE[0],
-                output_width_chars=nethack.nethack.TERMINAL_SHAPE[1],
-                char_array=self.render_char_array,
-                offset_h=0,
-                offset_w=0,
-            )
-
-            return out_image
-        else:
-            return self.env.render()
