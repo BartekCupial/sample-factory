@@ -21,6 +21,10 @@ def get_rnn_size(cfg):
     elif cfg.rnn_type == "nanogpt":
         size = cfg.nanogpt_block_size * (cfg.nanogpt_model_size + 2)
 
+    elif cfg.rnn_type == "linear_transformer":
+        size = cfg.rnn_num_layers * cfg.nanogpt_model_size * (cfg.nanogpt_model_size + 1)
+
+
     if not cfg.actor_critic_share_weights:
         # actor and critic need separate states
         size *= 2
