@@ -10,6 +10,7 @@ from sf_examples.nethack.utils.tasks import (
     NetHackGold,
     NetHackOracle,
     NetHackScout,
+    NetHackScoutChallenge,
     NetHackStaircase,
     NetHackStaircasePet,
 )
@@ -36,6 +37,7 @@ NETHACK_ENVS = dict(
     eat=NetHackEat,
     scout=NetHackScout,
     challenge=NetHackChallenge,
+    scout_challenge=NetHackScoutChallenge,
 )
 
 
@@ -104,6 +106,9 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
     # warnings.warn("Ignoring cfg.reward_win and cfg.reward_lose")
     if cfg.state_counter is not None:
         kwargs.update(state_counter=cfg.state_counter)
+
+    if env_name == "scout_challenge":
+        kwargs.update(scout_multiplier=cfg.scout_multiplier, score_clip=cfg.score_clip)
 
     env = env_class(**kwargs)
 

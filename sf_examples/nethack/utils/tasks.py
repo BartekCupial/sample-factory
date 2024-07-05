@@ -197,3 +197,21 @@ class NetHackScout(NetHackChallenge):
         self.dungeon_explored[key] = explored
         time_penalty = self._get_time_penalty(last_observation, observation)
         return reward + time_penalty
+
+
+class NetHackScoutChallenge(NetHackScout, NetHackChallenge):
+    def __init__(self, *args, scout_multiplier=1.0, score_clip=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.scout_multiplier = scout_multiplier
+        self.score_clip = score_clip
+
+    def _reward_fn(self, last_observation, action, observation, end_status):
+        scout = super(NetHackScout, self)._reward_fn(last_observation, action, observation, end_status)
+        score = super(NetHackChallenge, self)._reward_fn(last_observation, action, observation, end_status)
+
+        scout *= self.scout_multiplier
+        score = np.clip(score, 0, self.score_clip) if self.score_clip else score
+
+        reward = scout + score
+        return reward
