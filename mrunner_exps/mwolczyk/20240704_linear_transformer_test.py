@@ -8,25 +8,24 @@ config = {
     "exp_tags": [name],
     "exp_point": "monk-APPO-KLAA-T",
     "train_for_env_steps": 2_000_000_000,
-    "group": "monk-APPO-KLAA-T",
+    "group": "default_exp",
     "character": "mon-hum-neu-mal",
-    "num_workers": 4,
-    "num_envs_per_worker": 16,
+    "num_workers": 16,
+    "num_envs_per_worker": 32,
     "worker_num_splits": 2,
     "rollout": 32,
     "async_rl": True,
-    "serial_mode": False,
     "save_milestones_ith": 10_000_000,
     "wandb_user": "rahid",
     "wandb_project": "sp_nethack",
     "wandb_group": "rahid",
+    "wandb_tags": [name],
     # "dataset_rollout": 32,
     # "dataset_batch_size": 8192,  # this equals bs = 256, 256 * 32 = 8192
     # "distillation_loss_coeff": 0.2,
     # "teacher_path": "/net/pr2/projects/plgrid/plgggmum_crl/bcupial/sf_checkpoints/@-AA-BC/pretrained_use_prev_action",
     "run_teacher_hs": False,
     "use_prev_action": True,
-    "model": "ScaledNet",
     "use_resnet": True,
     "rnn_size": 512,
     "use_dataset": True,
@@ -34,14 +33,15 @@ config = {
     "dataset_num_workers": 8,
     "supervised_loss_coeff": 1.0,
     "behavioral_clone": True,
-    "process_seq_in_batch_mode": True,
+    "restart_behavior": "overwrite",
 
     # Athena
     # "db_path": "/ttyrecs/ttyrecs.db",
     # "dataset_name": "autoascend",
-    # "batch_size": 32,
-    # "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
+    # "batch_size": 128,
+    # "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
     # "with_wandb": True,
+    # "serial_mode": False,
 
     # Local
     "db_path": "/home/maciejwolczyk/Repos/ttyrecs.db",
@@ -49,41 +49,26 @@ config = {
     "batch_size": 4,
     "dataset_batch_size": 16,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": False,
+    "serial_mode": True,
+
+    # TODO: change?
+    "decorrelate_envs_on_one_worker": False,
+
+
 }
 
 # params different between exps
 base_params_grid = [
-    # {
-    #     "seed": list(range(3)),
-    #     "rnn_type": ["lstm"],
-    #     "learning_rate": [1e-5, 5e-5, 1e-4],
-    #     "rnn_size": [512],
-    # },
     {
         "seed": list(range(3)),
-        "rnn_type": ["nanogpt"],
-        "rnn_size": [512],
+        "rnn_type": ["linear_transformer"],
         "learning_rate": [1e-4, 1e-3],
-        "nanogpt_model_size": [256],
-        "rnn_num_layers": [3],
-        "nanogpt_n_head": [8],
-        "nanogpt_dropout": [0.],
-        "nanogpt_embedding_type": ["rope"],
-        "nanogpt_relative_timesteps": [True],
-        "nanogpt_constant_context": [False],
-        "nanogpt_block_size": [256]
+        "rnn_size": [512],
+        "model": ["ScaledNet"],
+        "process_seq_in_batch_mode": [True, False],
+        "nanogpt_model_size": [64],
+        "rnn_num_layers": [2],
     },
-    
-    # {
-    #     "seed": list(range(3)),
-    #     "rnn_type": ["mamba"],
-    #     "rnn_size": [512],
-    #     "learning_rate": [1e-4, 5e-4],
-    #     "max_grad_norm": [4.],
-    #     "mamba_model_size": [256],
-    #     "rnn_num_layers": [3],
-    #     "mamba_use_complex": [False],
-    # },
 ]
 
 
@@ -94,6 +79,7 @@ for grid in base_params_grid:
     for rollout in [32]:
         new_grid = grid.copy()
         new_grid["rollout"] = [rollout]
+        # new_grid["nanogpt_block_size"] = [64, 256]
         new_grid["dataset_rollout"] = [rollout]
         new_grid["dataset_batch_size"] = [config["dataset_batch_size"] * rollout]
         new_grid["batch_size"] = [config["batch_size"] * rollout]

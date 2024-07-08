@@ -596,7 +596,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--rnn_type",
         default="gru",
-        choices=["gru", "lstm", "mamba", "nanogpt"],
+        choices=["gru", "lstm", "mamba", "nanogpt", "linear_transformer"],
         type=str,
         help="Type of RNN cell to use if use_rnn is True",
     )
@@ -630,9 +630,9 @@ def add_model_args(p: ArgumentParser):
     )
     p.add_argument(
         "--nanogpt_embedding_type",
-        default="table",
+        default="rope",
         type=str,
-        choices=["table", "sine", "rope", "linear"],
+        choices=["none", "table", "sine", "rope", "linear"],
     )
     p.add_argument(
         "--nanogpt_attention_type",
@@ -642,7 +642,7 @@ def add_model_args(p: ArgumentParser):
     )
     p.add_argument(
         "--nanogpt_constant_context",
-        default=True,
+        default=False,
         type=str2bool,
     )
     p.add_argument(

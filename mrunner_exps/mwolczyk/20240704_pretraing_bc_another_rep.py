@@ -54,8 +54,7 @@ config = {
     "serial_mode": True,
 
 
-    # TODO: set to true later!!!
-    "decorrelate_envs_on_one_worker": False,
+    "decorrelate_envs_on_one_worker": True,
 }
 
 # params different between exps
@@ -63,12 +62,19 @@ base_params_grid = [
     {
         "seed": list(range(3)),
         "rnn_type": ["nanogpt"],
-        "learning_rate": [1e-4, 1e-3],
+        "learning_rate": [1e-4, 5e-4, 1e-3],
         "rnn_size": [512],
-        "decoder_mlp_layers": [[]],
-        "rnn_num_layers": [1],
-        "model": ["ScaledNet"],
+        "decoder_mlp_layers": [[], [512, 512]],
+        "model": ["ChaoticDwarvenNet"],
         "process_seq_in_batch_mode": [True],
+        "nanogpt_model_size": [128, 256],
+        "rnn_num_layers": [1, 3],
+        "nanogpt_n_head": [8],
+        "nanogpt_dropout": [0.],
+        "nanogpt_embedding_type": ["rope"],
+        "nanogpt_relative_timesteps": [True],
+        "nanogpt_constant_context": [False],
+        "nanogpt_block_size": [256]
     },
 ]
 

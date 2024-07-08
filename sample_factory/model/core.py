@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from sample_factory.model.linear_transformer import DeepLinearAttention
 from sample_factory.model.mamba import MixerModel
 from sample_factory.model.model_utils import ModelModule
 from sample_factory.model.nanogpt import GPTConfig, GPT
@@ -189,6 +190,16 @@ class ModelCoreRNN(ModelCore):
             )
 
             self.core = xLSTMBlockStack(cfg)
+        elif cfg.rnn_type == "linear_transformer":
+            self.is_linear_transformer = True
+            self.core = DeepLinearAttention(
+                input_size=input_size,
+                output_size=cfg.rnn_size,
+                num_layers=cfg.rnn_num_layers,
+                d_model=cfg.nanogpt_model_size,
+                embedding_type=cfg.nanogpt_embedding_type,
+            )
+
 
         else:
             raise RuntimeError(f"Unknown RNN type {cfg.rnn_type}")
@@ -204,14 +215,14 @@ class ModelCoreRNN(ModelCore):
         if not is_seq:
             head_output = head_output.unsqueeze(0)
 
-        if not self.is_nanogpt:
+        if not self.is_nanogpt and not self.is_linear_transformer:
             if self.rnn_num_layers > 1:
                 rnn_states = rnn_states.view(rnn_states.size(0), self.cfg.rnn_num_layers, -1)
                 rnn_states = rnn_states.permute(1, 0, 2)
             else:
                 rnn_states = rnn_states.unsqueeze(0)
 
-        if self.is_mamba or self.is_gru or self.is_nanogpt:
+        if self.is_mamba or self.is_gru or self.is_nanogpt or self.is_linear_transformer:
             x, new_rnn_states = self.core(head_output, rnn_states.contiguous())
         else:
             # Just give zeros to LSTM
@@ -222,7 +233,7 @@ class ModelCoreRNN(ModelCore):
         if not is_seq:
             x = x.squeeze(0)
 
-        if not self.is_nanogpt:
+        if not self.is_nanogpt and not self.is_linear_transformer:
             if self.rnn_num_layers > 1:
                 new_rnn_states = new_rnn_states.permute(1, 0, 2)
                 new_rnn_states = new_rnn_states.reshape(new_rnn_states.size(0), -1)

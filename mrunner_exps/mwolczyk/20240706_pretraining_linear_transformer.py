@@ -56,29 +56,24 @@ base_params_grid = [
     # {
     #     "seed": list(range(3)),
     #     "rnn_type": ["lstm"],
-    #     "learning_rate": [1e-5, 5e-5, 1e-4],
+    #     "learning_rate": [1e-5, 5e-5],
     #     "rnn_size": [512],
     # },
     {
         "seed": list(range(3)),
-        "rnn_type": ["nanogpt"],
+        "rnn_type": ["linear_transformer"],
         "rnn_size": [512],
-        "learning_rate": [1e-4, 1e-3],
+        "learning_rate": [1e-4, 5e-4, 1e-3],
         "nanogpt_model_size": [256],
         "rnn_num_layers": [3],
-        "nanogpt_n_head": [8],
-        "nanogpt_dropout": [0.],
-        "nanogpt_embedding_type": ["rope"],
-        "nanogpt_relative_timesteps": [True],
-        "nanogpt_constant_context": [False],
-        "nanogpt_block_size": [256]
+        "process_seq_in_batch_mode": [True],
+        "nanogpt_embedding_type": ["sine", "rope", "none"]
     },
-    
     # {
     #     "seed": list(range(3)),
     #     "rnn_type": ["mamba"],
     #     "rnn_size": [512],
-    #     "learning_rate": [1e-4, 5e-4],
+    #     "learning_rate": [3e-4, 7e-4],
     #     "max_grad_norm": [4.],
     #     "mamba_model_size": [256],
     #     "rnn_num_layers": [3],
