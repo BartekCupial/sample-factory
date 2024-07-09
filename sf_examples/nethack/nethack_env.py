@@ -13,14 +13,17 @@ from nle.env.tasks import (
 )
 
 from nle_utils.wrappers import (
-    BlstatsInfoWrapper,
+    FinalStatsWrapper,
     GymV21CompatibilityV0,
+    LastInfo,
     NLETimeLimit,
     PrevActionsWrapper,
+    RenderTiles,
     TaskRewardsInfoWrapper,
     TtyrecInfoWrapper,
 )
 from sample_factory.algo.utils.gymnasium_utils import patch_non_gymnasium_env
+from sample_factory.utils.utils import experiment_dir
 
 NETHACK_ENVS = dict(
     staircase=NetHackStaircase,
@@ -105,10 +108,14 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         env = PrevActionsWrapper(env)
 
     if cfg.add_stats_to_info:
-        env = BlstatsInfoWrapper(env)
-        env = TaskRewardsInfoWrapper(env)
-        if cfg.save_ttyrec_every != 0:
-            env = TtyrecInfoWrapper(env)
+        env = FinalStatsWrapper(env, done_only=False)
+        env = TaskRewardsInfoWrapper(env, done_only=False)
+        env = TtyrecInfoWrapper(env, done_only=False)
+
+    if cfg.save_videos:
+        output_dir = Path(experiment_dir(cfg=cfg)) / "videos"
+        env = LastInfo(env)
+        env = RenderTiles(env, output_dir=output_dir, tileset_path="nle_utils/tilesets/3.6.1tiles32.png")
 
     # if cfg.reward_shaping:
     #     env = VariablesInfoWrapper(env)

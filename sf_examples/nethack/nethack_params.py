@@ -24,6 +24,7 @@ def add_extra_params_nethack_env(parser):
     p.add_argument("--reward_shaping", type=str2bool, default=False)
     p.add_argument("--scout_multiplier", type=float, default=1.0)
     p.add_argument("--score_clip", type=float, default=None)
+    p.add_argument("--save_videos", default=False, type=str2bool)
     p.add_argument(
         "--observation_keys",
         type=ast.literal_eval,
