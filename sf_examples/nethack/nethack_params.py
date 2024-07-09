@@ -24,6 +24,26 @@ def add_extra_params_nethack_env(parser):
     p.add_argument("--reward_shaping", type=str2bool, default=False)
     p.add_argument("--scout_multiplier", type=float, default=1.0)
     p.add_argument("--score_clip", type=float, default=None)
+    p.add_argument(
+        "--observation_keys",
+        type=ast.literal_eval,
+        default=(
+            "message",
+            "blstats",
+            "tty_chars",
+            "tty_colors",
+            "tty_cursor",
+            # ALSO AVAILABLE (OFF for speed)
+            # "specials",
+            # "colors",
+            # "chars",
+            # "glyphs",
+            # "inv_glyphs",
+            # "inv_strs",
+            # "inv_letters",
+            # "inv_oclasses",
+        ),
+    )
 
 
 def add_extra_params_model(parser):

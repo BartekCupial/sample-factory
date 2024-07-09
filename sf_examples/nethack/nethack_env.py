@@ -1,32 +1,26 @@
 from pathlib import Path
 from typing import Optional
 
-from nle.env.tasks import NetHackScore
-
-from sample_factory.algo.utils.gymnasium_utils import patch_non_gymnasium_env
-from sf_examples.nethack.utils.tasks import (
+from nle.env.tasks import (
     NetHackChallenge,
     NetHackEat,
     NetHackGold,
     NetHackOracle,
+    NetHackScore,
     NetHackScout,
-    NetHackScoutChallenge,
     NetHackStaircase,
     NetHackStaircasePet,
 )
-from sf_examples.nethack.utils.wrappers import (
+
+from nle_utils.wrappers import (
     BlstatsInfoWrapper,
     GymV21CompatibilityV0,
-    NetHackRewardShapingWrapper,
     NLETimeLimit,
     PrevActionsWrapper,
-    RenderCharImagesWithNumpyWrapperV2,
-    SeedActionSpaceWrapper,
     TaskRewardsInfoWrapper,
     TtyrecInfoWrapper,
-    VariablesInfoWrapper,
 )
-from sf_examples.nethack.utils.wrappers.reward_shaping import GAME_REWARD
+from sample_factory.algo.utils.gymnasium_utils import patch_non_gymnasium_env
 
 NETHACK_ENVS = dict(
     staircase=NetHackStaircase,
@@ -37,7 +31,6 @@ NETHACK_ENVS = dict(
     eat=NetHackEat,
     scout=NetHackScout,
     challenge=NetHackChallenge,
-    scout_challenge=NetHackScoutChallenge,
 )
 
 
@@ -51,23 +44,9 @@ def nethack_env_by_name(name):
 def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = None):
     env_class = nethack_env_by_name(env_name)
 
-    observation_keys = (
-        "message",
-        "blstats",
-        "tty_chars",
-        "tty_colors",
-        "tty_cursor",
-        # ALSO AVAILABLE (OFF for speed)
-        # "specials",
-        # "colors",
-        # "chars",
-        # "glyphs",
-        # "inv_glyphs",
-        # "inv_strs",
-        # "inv_letters",
-        # "inv_oclasses",
-    )
+    observation_keys = cfg.observation_keys
 
+    # FIXME: there is no way to load game saves
     if cfg.gameloaddir:
         # gameloaddir can be either list or a single path
         if isinstance(cfg.gameloaddir, list):
@@ -115,12 +94,12 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
     # add TimeLimit.truncated to info
     env = NLETimeLimit(env)
 
-    if cfg.add_image_observation:
-        env = RenderCharImagesWithNumpyWrapperV2(
-            env,
-            crop_size=cfg.crop_dim,
-            rescale_font_size=(cfg.pixel_size, cfg.pixel_size),
-        )
+    # if cfg.add_image_observation:
+    #     env = RenderCharImagesWithNumpyWrapperV2(
+    #         env,
+    #         crop_size=cfg.crop_dim,
+    #         rescale_font_size=(cfg.pixel_size, cfg.pixel_size),
+    #     )
 
     if cfg.use_prev_action:
         env = PrevActionsWrapper(env)
@@ -131,9 +110,9 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         if cfg.save_ttyrec_every != 0:
             env = TtyrecInfoWrapper(env)
 
-    if cfg.reward_shaping:
-        env = VariablesInfoWrapper(env)
-        env = NetHackRewardShapingWrapper(env, GAME_REWARD)
+    # if cfg.reward_shaping:
+    #     env = VariablesInfoWrapper(env)
+    #     env = NetHackRewardShapingWrapper(env, GAME_REWARD)
 
     # convert gym env to gymnasium one, due to issues with render NLE in reset
     gymnasium_env = GymV21CompatibilityV0(env=env)
@@ -150,8 +129,8 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
     if render_mode:
         env.render_mode = render_mode
 
-    if cfg.serial_mode and cfg.num_workers == 1:
-        # full reproducability can only be achieved in serial mode and when there is only 1 worker
-        env = SeedActionSpaceWrapper(env)
+    # if cfg.serial_mode and cfg.num_workers == 1:
+    #     # full reproducability can only be achieved in serial mode and when there is only 1 worker
+    #     env = SeedActionSpaceWrapper(env)
 
     return env
