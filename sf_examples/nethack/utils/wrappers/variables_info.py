@@ -1,6 +1,6 @@
 import gym
 
-from sf_examples.nethack.utils.blstats import BLStats
+from nle_utils.blstats import BLStats
 from sf_examples.nethack.utils.score import Score
 
 

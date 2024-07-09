@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from nle import nethack
 
-from sf_examples.nethack.utils.blstats import BLStats
+from nle_utils.blstats import BLStats
 
 monster_data = pd.read_csv("sf_examples/nethack/utils/reward_shaping/monster_data.csv")
 
