@@ -113,9 +113,8 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         env = TtyrecInfoWrapper(env, done_only=False)
 
     if cfg.save_videos:
-        output_dir = Path(experiment_dir(cfg=cfg)) / "videos"
         env = LastInfo(env)
-        env = RenderTiles(env, output_dir=output_dir, tileset_path="nle_utils/tilesets/3.6.1tiles32.png")
+        env = RenderTiles(env, output_dir=cfg.video_folder_name, tileset_path="nle_utils/tilesets/3.6.1tiles32.png")
 
     # if cfg.reward_shaping:
     #     env = VariablesInfoWrapper(env)

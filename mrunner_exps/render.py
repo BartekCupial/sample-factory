@@ -15,7 +15,7 @@ config = {
     "train_dir": "/home/bartek/Workspace/ideas/sample-factory/train_dir",
     "experiment": "amzn-AA-BC_pretrained",
     "sample_env_episodes": 16,
-    "num_workers": 16,
+    "num_workers": 4,
     "num_envs_per_worker": 1,
     "worker_num_splits": 1,
     "restart_behavior": "overwrite",
@@ -41,6 +41,7 @@ config = {
 csv_folder_name = f"{config['character']}_episodes{config['sample_env_episodes']}"
 train_dir = "train_dir"
 experiment = "amzn-AA-BC_pretrained"
+video_folder_names = [f"{train_dir}/{experiment}/videos_{i}" for i in range(5)]
 
 # params different between exps
 params_grid = [
@@ -51,6 +52,7 @@ params_grid = [
         "train_dir": [train_dir],
         "experiment": [experiment],
         "savedir": [f"{train_dir}/{experiment}/{csv_folder_name}/nle_data"],
+        "video_folder_name": video_folder_names,
     },
 ]
 

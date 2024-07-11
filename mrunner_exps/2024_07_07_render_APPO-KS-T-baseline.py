@@ -60,10 +60,11 @@ for method_path in method_paths:
         train_dir = str(checkpoint.parent.parent)
         experiment = checkpoint.parent.name
         savedir = f"{train_dir}/{experiment}/{csv_folder_name}/nle_data"
-
+        video_folder_names = [f"{train_dir}/{experiment}/videos_{i}" for i in range(5)]
         params_grid.append(
             {
                 "csv_folder_name": [csv_folder_name],
+                "video_folder_name": video_folder_names,
                 "train_dir": [train_dir],
                 "experiment": [experiment],
                 "savedir": [savedir],
