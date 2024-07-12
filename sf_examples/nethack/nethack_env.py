@@ -16,6 +16,7 @@ from nle_utils.wrappers import (
     FinalStatsWrapper,
     GymV21CompatibilityV0,
     LastInfo,
+    LoadSave,
     NLETimeLimit,
     PrevActionsWrapper,
     RenderTiles,
@@ -23,7 +24,6 @@ from nle_utils.wrappers import (
     TtyrecInfoWrapper,
 )
 from sample_factory.algo.utils.gymnasium_utils import patch_non_gymnasium_env
-from sample_factory.utils.utils import experiment_dir
 
 NETHACK_ENVS = dict(
     staircase=NetHackStaircase,
@@ -49,7 +49,6 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
 
     observation_keys = cfg.observation_keys
 
-    # FIXME: there is no way to load game saves
     if cfg.gameloaddir:
         # gameloaddir can be either list or a single path
         if isinstance(cfg.gameloaddir, list):
@@ -77,7 +76,6 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         penalty_mode=cfg.fn_penalty_step,
         savedir=cfg.savedir,
         save_ttyrec_every=cfg.save_ttyrec_every,
-        # gameloaddir=gameloaddir,
     )
     if env_name == "challenge":
         kwargs["no_progress_timeout"] = 150
@@ -96,6 +94,9 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
 
     # add TimeLimit.truncated to info
     env = NLETimeLimit(env)
+
+    if gameloaddir is not None:
+        env = LoadSave(env, gameloaddir)
 
     # if cfg.add_image_observation:
     #     env = RenderCharImagesWithNumpyWrapperV2(
