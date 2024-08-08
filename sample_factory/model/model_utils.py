@@ -10,19 +10,19 @@ from sample_factory.utils.typing import Config
 
 def get_rnn_size(cfg):
     if cfg.use_rnn:
-        size = cfg.rnn_size * cfg.rnn_num_layers
+        size = cfg.rnn_d_output * cfg.rnn_num_layers
     else:
         size = 1
 
     if cfg.rnn_type == "lstm":
         size *= 2
     elif cfg.rnn_type == "mamba":
-        size = (cfg.rnn_num_layers * cfg.mamba_model_size * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
+        size = (cfg.rnn_num_layers * cfg.rnn_d_model * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
     elif cfg.rnn_type == "nanogpt":
-        size = cfg.nanogpt_block_size * (cfg.nanogpt_model_size + 2)
+        size = cfg.nanogpt_block_size * (cfg.rnn_d_model + 2)
 
     elif cfg.rnn_type == "linear_transformer":
-        size = cfg.rnn_num_layers * cfg.nanogpt_model_size * (cfg.nanogpt_model_size + 1) + 1  # Timestep
+        size = cfg.rnn_num_layers * cfg.rnn_d_model * (cfg.rnn_d_model + 1) + 1  # Timestep
 
 
     if not cfg.actor_critic_share_weights:

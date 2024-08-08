@@ -58,7 +58,7 @@ From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
     cd ../../..
 
     # install sample factory
-    pip install .[dev,nethack,mrunner]
+    pip install .[dev,nethack,mrunner,atari]
 
     pip install causal_conv1d
     pip install mamba-ssm

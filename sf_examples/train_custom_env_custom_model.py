@@ -91,7 +91,7 @@ def override_default_params(parser):
 
     """
     parser.set_defaults(
-        rnn_size=128,
+        rnn_d_output=128,
     )
 
 

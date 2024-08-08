@@ -4,6 +4,7 @@ name = globals()["script"][:-3]
 
 # params for all exps
 config = {
+    "run_script": "sf_examples.atari.train_atari",
     "env": "challenge",
     "exp_tags": [name],
     "exp_point": "monk-APPO-KLAA-T",

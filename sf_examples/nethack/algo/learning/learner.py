@@ -192,9 +192,9 @@ class DatasetLearner(Learner):
 
         # Zero out history for consistency with the batch version
         if self.cfg.rnn_type == "nanogpt":
-            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size, self.cfg.nanogpt_model_size + 2).clone()
+            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size, self.cfg.rnn_d_model + 2).clone()
             rnn_state[:, :self.cfg.rollout] = 0.
-            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size * (self.cfg.nanogpt_model_size + 2))
+            rnn_state = rnn_state.view(-1, self.cfg.nanogpt_block_size * (self.cfg.rnn_d_model + 2))
 
         for i in range(seq_len):
             # we split the forward since we want to use teacher from kickstarter

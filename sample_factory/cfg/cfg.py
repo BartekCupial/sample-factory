@@ -544,13 +544,15 @@ def add_model_args(p: ArgumentParser):
         nargs="*",
         help="Optional fully connected layers after the convolutional encoder head.",
     )
+    p.add_argument("--use_rnn", default=True, type=str2bool, help="Whether to use RNN core in a policy or not")
+
 
     # model core settings (core is identity function if we're not using RNNs)
     p.add_argument(
-        "--rnn_size",
+        "--rnn_d_output",
         default=512,
         type=int,
-        help="Size of the RNN hidden state in recurrent model (e.g. GRU or LSTM)",
+        help="Size of the output of the RNN",
     )
     p.add_argument(
         "--decay_hidden_states",
@@ -571,7 +573,7 @@ def add_model_args(p: ArgumentParser):
         help="Expand factor of Mamba ssm",
     )
     p.add_argument(
-        "--mamba_model_size",
+        "--rnn_d_model",
         default=128,
         type=int,
         help="Size of the Mamba d_model",
@@ -601,16 +603,9 @@ def add_model_args(p: ArgumentParser):
         help="Type of RNN cell to use if use_rnn is True",
     )
     p.add_argument(
-        "--nanogpt_model_size",
-        default=128,
-        type=int,
-        help="Size of the nanogpt d_model",
-    )
-    p.add_argument(
         "--nanogpt_block_size",
         default=64,
         type=int,
-        help="Size of the nanogpt d_model",
     )
     p.add_argument(
         "--nanogpt_n_head",
@@ -926,3 +921,5 @@ def add_pbt_args(p: ArgumentParser):
         type=float,
         help="When PBT mutates a float hyperparam, it samples the change magnitude randomly from the uniform distribution [pbt_perturb_min, pbt_perturb_max]",
     )
+    p.add_argument("--critic_increase_factor", type=float, default=1)
+    p.add_argument("--learning_rate_groups", type=ast.literal_eval, default=None)

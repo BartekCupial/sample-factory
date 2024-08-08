@@ -22,7 +22,7 @@ def atari_override_defaults(_env, parser):
         adaptive_stddev=False,
         reward_scale=1.0,
         with_vtrace=False,
-        recurrence=1,
+        recurrence=4,
         batch_size=256,
         rollout=128,
         max_grad_norm=0.5,

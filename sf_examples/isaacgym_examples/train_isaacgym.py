@@ -329,7 +329,7 @@ env_configs = dict(
         # No encoder, we directly feed observations into LSTM. A bit weird but this is what IGE does as well.
         encoder_mlp_layers=[],
         use_rnn=True,
-        rnn_size=768,
+        rnn_d_output=768,
         rnn_type="lstm",
         decoder_mlp_layers=[768, 512, 256],  # mlp layers AFTER the LSTM
         gamma=0.99,

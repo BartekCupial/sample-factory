@@ -119,19 +119,22 @@ class ModelCoreRNN(ModelCore):
         self.is_gru = False
         self.is_mamba = False
         self.is_nanogpt = False
+        self.is_linear_transformer = False
 
         cfg.rnn_input_size = input_size
 
         if cfg.rnn_type == "gru":
-            self.core = nn.GRU(input_size, cfg.rnn_size, cfg.rnn_num_layers)
+            assert cfg.rnn_d_model == cfg.rnn_d_output, "d_model = d_output in RNNs"
+            self.core = nn.GRU(input_size, cfg.rnn_d_output, cfg.rnn_num_layers)
             self.is_gru = True
         elif cfg.rnn_type == "lstm":
-            self.core = nn.LSTM(input_size, cfg.rnn_size, cfg.rnn_num_layers)
+            assert cfg.rnn_d_model == cfg.rnn_d_output, "d_model = d_output in RNNs"
+            self.core = nn.LSTM(input_size, cfg.rnn_d_output, cfg.rnn_num_layers)
         elif cfg.rnn_type == "mamba":
             self.is_mamba = True
             self.core = CustomMamba(input_size,
-                                    output_size=cfg.rnn_size,
-                                    d_model=cfg.mamba_model_size,
+                                    output_size=cfg.rnn_d_output,
+                                    d_model=cfg.rnn_d_model,
                                     d_state=cfg.mamba_state_size,
                                     d_conv=cfg.mamba_conv_size,
                                     expand=cfg.mamba_expand,
@@ -142,9 +145,9 @@ class ModelCoreRNN(ModelCore):
             self.is_nanogpt = True
             GPT_cfg = GPTConfig(
                 input_size=input_size,
-                output_size=cfg.rnn_size,
+                output_size=cfg.rnn_d_output,
                 num_layers=cfg.rnn_num_layers,
-                d_model=cfg.nanogpt_model_size,
+                d_model=cfg.rnn_d_model,
                 n_head=cfg.nanogpt_n_head,
                 dropout=cfg.nanogpt_dropout,
                 block_size=cfg.nanogpt_block_size,
@@ -184,7 +187,7 @@ class ModelCoreRNN(ModelCore):
                 ),
                 context_length=256,
                 num_blocks=cfg.rnn_num_layers,
-                embedding_dim=cfg.nanogpt_model_size,
+                embedding_dim=cfg.rnn_d_model,
                 slstm_at=[1],
 
             )
@@ -194,9 +197,9 @@ class ModelCoreRNN(ModelCore):
             self.is_linear_transformer = True
             self.core = DeepLinearAttention(
                 input_size=input_size,
-                output_size=cfg.rnn_size,
+                output_size=cfg.rnn_d_output,
                 num_layers=cfg.rnn_num_layers,
-                d_model=cfg.nanogpt_model_size,
+                d_model=cfg.rnn_d_model,
                 embedding_type=cfg.nanogpt_embedding_type,
             )
 
@@ -204,7 +207,7 @@ class ModelCoreRNN(ModelCore):
         else:
             raise RuntimeError(f"Unknown RNN type {cfg.rnn_type}")
 
-        self.core_output_size = cfg.rnn_size
+        self.core_output_size = cfg.rnn_d_output
         self.rnn_num_layers = cfg.rnn_num_layers
 
     def forward(self, head_output, rnn_states):
@@ -226,7 +229,7 @@ class ModelCoreRNN(ModelCore):
             x, new_rnn_states = self.core(head_output, rnn_states.contiguous())
         else:
             # Just give zeros to LSTM
-            h, c = torch.split(rnn_states, self.cfg.rnn_size, dim=2)
+            h, c = torch.split(rnn_states, self.cfg.rnn_d_output, dim=2)
             x, (h, c) = self.core(head_output, (h.contiguous(), c.contiguous()))
             new_rnn_states = torch.cat((h, c), dim=2)
 

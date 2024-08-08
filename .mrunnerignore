@@ -9,7 +9,6 @@ nle/
 minihack
 notebooks/
 artifacts/
-sf_examples/atari/
 sf_examples/brax/
 sf_examples/dmlab/
 sf_examples/envpool/
