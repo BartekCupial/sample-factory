@@ -12,16 +12,16 @@ with open("README.md", "r") as f:
     long_description = "\n".join(descr_no_gifs)
 
 
-_atari_deps = ["gymnasium[atari, accept-rom-license]"]
-_mujoco_deps = ["gymnasium[mujoco]", "mujoco<2.5"]
+_atari_deps = ["gymnasium[accept-rom-license]"]
+_mujoco_deps = ["gymnasium[mujoco]"]
 _envpool_deps = ["envpool"]
 _nethack_deps = [
     "numba ~= 0.58",
     "pandas ~= 2.1",
     "matplotlib ~= 3.8",
     "seaborn ~= 0.12",
-    "scipy ~= 1.11",
-    "shimmy",
+    "scipy ~= 0.2.1",
+    "shimmy==1.3.0",
     "tqdm ~= 4.66",
     "debugpy ~= 1.6",
 ]
