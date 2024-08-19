@@ -12,16 +12,16 @@ with open("README.md", "r") as f:
     long_description = "\n".join(descr_no_gifs)
 
 
-_atari_deps = ["gymnasium[accept-rom-license]"]
-_mujoco_deps = ["gymnasium[mujoco]"]
+_atari_deps = ["gymnasium[atari, accept-rom-license]"]
+_mujoco_deps = ["gymnasium[mujoco]", "mujoco<2.5"]
 _envpool_deps = ["envpool"]
 _nethack_deps = [
     "numba ~= 0.58",
     "pandas ~= 2.1",
     "matplotlib ~= 3.8",
     "seaborn ~= 0.12",
-    "scipy ~= 0.2.1",
-    "shimmy==1.3.0",
+    "scipy ~= 1.11",
+    "shimmy",
     "tqdm ~= 4.66",
     "debugpy ~= 1.6",
 ]
@@ -51,6 +51,7 @@ setup(
         "Videos": "https://sites.google.com/view/sample-factory",
     },
     install_requires=[
+        "einops",
         "numpy>=1.18.1,<2.0",
         # "torch>=1.9,<3.0,!=1.13.0", # install with conda install -yq pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
         "gymnasium>=0.27,<1.0",
@@ -80,7 +81,7 @@ setup(
         "vizdoom": ["vizdoom<2.0", "gymnasium[classic_control]"],
         # "dmlab": ["dm_env"],  <-- these are just auxiliary packages, the main package has to be built from sources
         "nethack": _nethack_deps,
-        "mrunner": ["mrunner @ git+https://gitlab.com/awarelab/mrunner.git"],
+        "mrunner": ["mrunner @ git+https://gitlab.com/awarelab/mrunner.git", "path<17.0"],
     },
     package_dir={"": "./"},
     packages=setuptools.find_packages(where="./", include=["sample_factory*", "sf_examples*"]),

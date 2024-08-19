@@ -1,16 +1,13 @@
 from abc import ABC
 
-from mamba_ssm.utils.generation import InferenceParams
 import torch
 from torch import nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from sample_factory.model.linear_transformer import DeepLinearAttention
-from sample_factory.model.mamba import MixerModel
+from sample_factory.model.mamba import CustomMamba, InferenceParams
 from sample_factory.model.model_utils import ModelModule
-from sample_factory.model.nanogpt import GPTConfig, GPT
+from sample_factory.model.nanogpt import AutoregressiveGPT, ContextWindowGPT, GPTConfig
 from sample_factory.utils.typing import Config
-
 
 
 class ModelCore(ModelModule, ABC):
@@ -20,95 +17,6 @@ class ModelCore(ModelModule, ABC):
 
     def get_out_size(self) -> int:
         return self.core_output_size
-
-
-class CustomMamba(nn.Module):
-    def __init__(self, input_size: int, output_size: int, d_model: int,
-                 d_state: int, d_conv: int, expand: int, num_layers: int = 1,
-                 use_complex: bool = False, selective: bool = True):
-        super().__init__()
-
-        self.input_size = input_size
-        self.output_size = output_size
-        self.d_model = d_model
-        self.d_state = d_state
-        self.d_conv = d_conv
-        self.expand = expand
-        self.num_layers = num_layers
-        self.use_complex = use_complex
-
-        ssm_cfg = {
-            "d_state": d_state,
-            "d_conv": d_conv,
-            "expand": expand,
-            "use_complex": use_complex,
-            "selective": selective,
-        }
-
-        self.input_projection = nn.Linear(input_size, d_model)
-        self.output_projection = nn.Linear(d_model, output_size)
-
-        self.core = MixerModel(d_model, n_layer=num_layers, ssm_cfg=ssm_cfg)
-
-    def forward(self, x, rnn_states):
-        # states -> [num_layers, batch_size, d_state]
-
-        # Handle rnn_states
-        inference_params = InferenceParams(max_seqlen=3,
-                                           max_batch_size=rnn_states.shape[1],
-                                           seqlen_offset=2)
-        rnn_states = rnn_states.reshape(self.num_layers, rnn_states.shape[1], -1, self.d_conv + self.d_state)
-        rnn_states = rnn_states.contiguous()
-        conv_state = rnn_states[..., :self.d_conv]
-        rnn_state = rnn_states[..., self.d_conv:]
-
-        if self.use_complex:
-            conv_state = conv_state.real
-
-        inference_params.key_value_memory_dict = {
-            layer_idx: (conv_state[layer_idx], rnn_state[layer_idx])
-            for layer_idx in range(self.num_layers)
-        }
-
-        # Process input
-        if isinstance(x, torch.nn.utils.rnn.PackedSequence):
-            x, lens = pad_packed_sequence(x, batch_first=False, padding_value=0.0)
-            to_repack = True
-        else:
-            to_repack = False
-
-        x = self.input_projection(x)
-        x = x.permute(1, 0, 2)
-        output_xs = []
-        for seq_idx in range(x.shape[1]):
-            current_x = self.core(x[:, seq_idx].unsqueeze(1), inference_params=inference_params)
-            output_xs += [current_x]
-        x = torch.cat(output_xs, dim=1)
-        x = x.permute(1, 0, 2)
-        x = self.output_projection(x)
-
-
-        if to_repack:
-            x = pack_padded_sequence(x, lens, batch_first=False, enforce_sorted=False)
-
-        conv_state = torch.stack(
-            list(inference_params.key_value_memory_dict[layer_idx][0]
-                 for layer_idx in range(self.num_layers)),
-            dim=0
-        )
-        rnn_state = torch.stack(
-            list(inference_params.key_value_memory_dict[layer_idx][1]
-                 for layer_idx in range(self.num_layers)),
-            dim=0
-        )
-
-        if self.use_complex:
-            conv_state = torch.complex(conv_state, torch.zeros_like(conv_state))
-
-        new_rnn_states = torch.cat((conv_state, rnn_state), dim=-1)
-        new_rnn_states = new_rnn_states.reshape(self.num_layers, new_rnn_states.size(1), -1)
-
-        return x, new_rnn_states
 
 
 class ModelCoreRNN(ModelCore):
@@ -158,7 +66,10 @@ class ModelCoreRNN(ModelCore):
                 attention_type=cfg.nanogpt_attention_type,
                 two_layer_norms=cfg.nanogpt_two_layer_norms,
             )
-            self.core = GPT(GPT_cfg)
+            if cfg.nanogpt_recurrent_mode:
+                self.core = AutoregressiveGPT(GPT_cfg)
+            else:
+                self.core = ContextWindowGPT(GPT_cfg)
         elif cfg.rnn_type == "xlstm":
             from xlstm import (
                 xLSTMBlockStack,
@@ -193,17 +104,6 @@ class ModelCoreRNN(ModelCore):
             )
 
             self.core = xLSTMBlockStack(cfg)
-        elif cfg.rnn_type == "linear_transformer":
-            self.is_linear_transformer = True
-            self.core = DeepLinearAttention(
-                input_size=input_size,
-                output_size=cfg.rnn_d_output,
-                num_layers=cfg.rnn_num_layers,
-                d_model=cfg.rnn_d_model,
-                embedding_type=cfg.nanogpt_embedding_type,
-            )
-
-
         else:
             raise RuntimeError(f"Unknown RNN type {cfg.rnn_type}")
 

@@ -1,8 +1,11 @@
 import math
+from dataclasses import dataclass, field
 from functools import partial
+from typing import Optional
 import torch
 import torch.nn as nn
 
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from sample_factory.model.mamba_simple import Mamba, Block
 
 try:
@@ -11,13 +14,32 @@ except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
 
+@dataclass
+class InferenceParams:
+    """Inference parameters that are passed to the main model in order
+    to efficienly calculate and store the context during inference."""
+
+    max_seqlen: int
+    max_batch_size: int
+    seqlen_offset: int = 0
+    batch_size_offset: int = 0
+    key_value_memory_dict: dict = field(default_factory=dict)
+    lengths_per_sample: Optional[torch.Tensor] = None
+
+    def reset(self, max_seqlen, max_batch_size):
+        self.max_seqlen = max_seqlen
+        self.max_batch_size = max_batch_size
+        self.seqlen_offset = 0
+        if self.lengths_per_sample is not None:
+            self.lengths_per_sample.zero_()
+
+
 def create_block(
     d_model,
     ssm_cfg=None,
     norm_epsilon=1e-5,
     rms_norm=False,
     residual_in_fp32=False,
-    fused_add_norm=False,
     layer_idx=None,
     device=None,
     dtype=None,
@@ -33,7 +55,6 @@ def create_block(
         d_model,
         mixer_cls,
         norm_cls=norm_cls,
-        fused_add_norm=fused_add_norm,
         residual_in_fp32=residual_in_fp32,
     )
     block.layer_idx = layer_idx
@@ -82,7 +103,6 @@ class MixerModel(nn.Module):
         norm_epsilon: float = 1e-5,
         rms_norm: bool = False,
         initializer_cfg=None,
-        fused_add_norm=False,
         residual_in_fp32=False,
         device=None,
         dtype=None,
@@ -96,10 +116,6 @@ class MixerModel(nn.Module):
         # Add -> LN -> Attn / MLP / Mixer, returning both the residual branch (output of Add) and
         # the main branch (output of MLP / Mixer). The model definition is unchanged.
         # This is for performance reason: we can fuse add + layer_norm.
-        self.fused_add_norm = fused_add_norm
-        if self.fused_add_norm:
-            if layer_norm_fn is None or rms_norm_fn is None:
-                raise ImportError("Failed to import Triton LayerNorm / RMSNorm kernels")
 
         self.layers = nn.ModuleList(
             [
@@ -109,7 +125,6 @@ class MixerModel(nn.Module):
                     norm_epsilon=norm_epsilon,
                     rms_norm=rms_norm,
                     residual_in_fp32=residual_in_fp32,
-                    fused_add_norm=fused_add_norm,
                     layer_idx=i,
                     **factory_kwargs,
                 )
@@ -141,19 +156,94 @@ class MixerModel(nn.Module):
             hidden_states, residual = layer(
                 hidden_states, residual, inference_params=inference_params
             )
-        if not self.fused_add_norm:
-            residual = (hidden_states + residual) if residual is not None else hidden_states
-            hidden_states = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
-        else:
-            # Set prenorm=False here since we don't need the residual
-            fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
-            hidden_states = fused_add_norm_fn(
-                hidden_states,
-                self.norm_f.weight,
-                self.norm_f.bias,
-                eps=self.norm_f.eps,
-                residual=residual,
-                prenorm=False,
-                residual_in_fp32=self.residual_in_fp32,
-            )
+        residual = (hidden_states + residual) if residual is not None else hidden_states
+        hidden_states = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
         return hidden_states
+
+
+class CustomMamba(nn.Module):
+    def __init__(self, input_size: int, output_size: int, d_model: int,
+                 d_state: int, d_conv: int, expand: int, num_layers: int = 1,
+                 use_complex: bool = False, selective: bool = True):
+        super().__init__()
+
+        self.input_size = input_size
+        self.output_size = output_size
+        self.d_model = d_model
+        self.d_state = d_state
+        self.d_conv = d_conv
+        self.expand = expand
+        self.num_layers = num_layers
+        self.use_complex = use_complex
+
+        ssm_cfg = {
+            "d_state": d_state,
+            "d_conv": d_conv,
+            "expand": expand,
+            "use_complex": use_complex,
+            "selective": selective,
+        }
+
+        self.input_projection = nn.Linear(input_size, d_model)
+        self.output_projection = nn.Linear(d_model, output_size)
+
+        self.core = MixerModel(d_model, n_layer=num_layers, ssm_cfg=ssm_cfg)
+
+    def forward(self, x, rnn_states):
+        # states -> [num_layers, batch_size, d_state]
+
+        # Handle rnn_states
+        inference_params = InferenceParams(max_seqlen=3,
+                                           max_batch_size=rnn_states.shape[1],
+                                           seqlen_offset=2)
+        rnn_states = rnn_states.reshape(self.num_layers, rnn_states.shape[1], -1, self.d_conv + self.d_state)
+        rnn_states = rnn_states.contiguous()
+        conv_state = rnn_states[..., :self.d_conv]
+        rnn_state = rnn_states[..., self.d_conv:]
+
+        if self.use_complex:
+            conv_state = conv_state.real
+
+        inference_params.key_value_memory_dict = {
+            layer_idx: (conv_state[layer_idx], rnn_state[layer_idx])
+            for layer_idx in range(self.num_layers)
+        }
+
+        # Process input
+        if isinstance(x, torch.nn.utils.rnn.PackedSequence):
+            x, lens = pad_packed_sequence(x, batch_first=False, padding_value=0.0)
+            to_repack = True
+        else:
+            to_repack = False
+
+        x = self.input_projection(x)
+        x = x.permute(1, 0, 2)
+        output_xs = []
+        for seq_idx in range(x.shape[1]):
+            current_x = self.core(x[:, seq_idx].unsqueeze(1), inference_params=inference_params)
+            output_xs += [current_x]
+        x = torch.cat(output_xs, dim=1)
+        x = x.permute(1, 0, 2)
+        x = self.output_projection(x)
+
+        if to_repack:
+            x = pack_padded_sequence(x, lens, batch_first=False, enforce_sorted=False)
+
+        conv_state = torch.stack(
+            list(inference_params.key_value_memory_dict[layer_idx][0]
+                 for layer_idx in range(self.num_layers)),
+            dim=0
+        )
+        rnn_state = torch.stack(
+            list(inference_params.key_value_memory_dict[layer_idx][1]
+                 for layer_idx in range(self.num_layers)),
+            dim=0
+        )
+
+        if self.use_complex:
+            conv_state = torch.complex(conv_state, torch.zeros_like(conv_state))
+
+        new_rnn_states = torch.cat((conv_state, rnn_state), dim=-1)
+        new_rnn_states = new_rnn_states.reshape(self.num_layers, new_rnn_states.size(1), -1)
+
+        return x, new_rnn_states

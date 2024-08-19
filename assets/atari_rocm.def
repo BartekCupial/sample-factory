@@ -51,7 +51,7 @@ From: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0
 
     # install sample factory
     cd /dungeons/
-    pip install .[dev,atari,mrunner]
+    pip install .[dev,atari,nethack,mrunner]
 
     chmod a+rw -R /opt/conda/bin/python
 

@@ -19,10 +19,10 @@ def get_rnn_size(cfg):
     elif cfg.rnn_type == "mamba":
         size = (cfg.rnn_num_layers * cfg.rnn_d_model * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
     elif cfg.rnn_type == "nanogpt":
-        size = cfg.nanogpt_block_size * (cfg.rnn_d_model + 2)
-
-    elif cfg.rnn_type == "linear_transformer":
-        size = cfg.rnn_num_layers * cfg.rnn_d_model * (cfg.rnn_d_model + 1) + 1  # Timestep
+        if cfg.nanogpt_recurrent_mode:
+            size = cfg.rnn_num_layers * cfg.rnn_d_model * (cfg.rnn_d_model + 1) + 1  # Timestep
+        else:
+            size = cfg.nanogpt_block_size * (cfg.rnn_d_model + 2)
 
 
     if not cfg.actor_critic_share_weights:

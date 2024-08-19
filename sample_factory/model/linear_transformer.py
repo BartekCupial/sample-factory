@@ -6,8 +6,6 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-# TODO: handle packedsequence
-
 MAX_EP_LEN = 10_000
 
 class Phi(nn.Module):
@@ -53,6 +51,7 @@ def rotate(x, position, d_model):
     return x * cos + x_rotated * sine
 
 
+# Split this into LinearAttention and Block. Reuse block from nanogpt?
 class LinearAttentionBlock(nn.Module):
     """
     The building block from the Linear Transformers are Secretly RNNs Paper. This is
@@ -132,8 +131,6 @@ class LinearAttentionBlock(nn.Module):
         numerator = torch.einsum("bti, btil -> btl", Q, S)
         # denominator = Q^T Z
 
-        # TODO: what is going on here?
-        # TODO: I think this is a bug...
         denominator = torch.einsum("bti, bti -> bt", Q, Z).reshape(B, T, 1) + 1e-5
         # output = (Q^T S) / (Q^T Z)
         output = numerator / denominator
@@ -171,6 +168,8 @@ class DeepLinearAttention(nn.Module):
         # each model has the same "storage".
         self.h = d_model
 
+        # TODO: input_projection
+
         core = [
             LinearAttentionBlock(
                 input_size=input_size,
@@ -189,6 +188,7 @@ class DeepLinearAttention(nn.Module):
         self.core = nn.ModuleList(core)
         self.unmap = nn.Linear(self.h, output_size)
 
+
     def forward(self, z, state):
         if isinstance(z, torch.nn.utils.rnn.PackedSequence):
             z, lens = pad_packed_sequence(z, batch_first=False, padding_value=0.0)
@@ -200,22 +200,6 @@ class DeepLinearAttention(nn.Module):
         T = z.shape[1]
 
 
-        # [batch_size]
-        timesteps = state[:, -1]
-        state = state[:, :-1]
-
-        # [B, -1] -> [B, num_layers, -1]
-        state = state.reshape(state.shape[0], self.num_layers, -1)
-        # [B, num_layers, -1] -> [num_layers, B, -1]
-        state = state.transpose(0, 1)
-
-        state = list(state.chunk(self.num_layers, dim=0))
-        for idx, layer_state in enumerate(state):
-            # ([B, 1, H * H + H])
-            layer_state = layer_state.transpose(0, 1)
-            # ([B, 1, H * H], [B, 1, H])
-            state[idx] = list(layer_state.split([self.h * self.h, self.h], dim=2))
-
         # [B, T]
         current_timesteps = timesteps.view(-1, 1) + torch.arange(T, device=timesteps.device).view(1, -1)
         if self.embedding_type == "sine":
@@ -225,7 +209,6 @@ class DeepLinearAttention(nn.Module):
             z = rotate(z, current_timesteps, z.shape[-1])
         elif self.embedding_type == "none":
             pass
-            
 
         z, state = self.forward_memory(z, state)
 
