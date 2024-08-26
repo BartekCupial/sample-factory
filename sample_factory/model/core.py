@@ -3,10 +3,11 @@ from abc import ABC
 import torch
 from torch import nn
 
-from sample_factory.model.linear_transformer import DeepLinearAttention
-from sample_factory.model.mamba import CustomMamba, InferenceParams
+from sample_factory.model.lru import LRU
+from sample_factory.model.mamba import CustomMamba
 from sample_factory.model.model_utils import ModelModule
-from sample_factory.model.nanogpt import AutoregressiveGPT, ContextWindowGPT, GPTConfig
+from sample_factory.model.nanogpt import AutoregressiveGPT, ContextWindowGPT, GPTConfig, IdentityGPT
+from sample_factory.model.nanogpt_rnn import GRUGPT
 from sample_factory.utils.typing import Config
 
 
@@ -66,8 +67,14 @@ class ModelCoreRNN(ModelCore):
                 attention_type=cfg.nanogpt_attention_type,
                 two_layer_norms=cfg.nanogpt_two_layer_norms,
             )
-            if cfg.nanogpt_recurrent_mode:
+            if cfg.nanogpt_time_mixing == "autoregressive_attention":
                 self.core = AutoregressiveGPT(GPT_cfg)
+            elif cfg.nanogpt_time_mixing == "lru":
+                self.core = LRU(GPT_cfg)
+            elif cfg.nanogpt_time_mixing == "gru":
+                self.core = GRUGPT(GPT_cfg)
+            elif cfg.nanogpt_time_mixing == "identity":
+                self.core = IdentityGPT(GPT_cfg)
             else:
                 self.core = ContextWindowGPT(GPT_cfg)
         elif cfg.rnn_type == "xlstm":

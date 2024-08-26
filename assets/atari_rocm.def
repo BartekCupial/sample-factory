@@ -37,11 +37,8 @@ From: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0
         /opt/conda/bin/conda clean -ya
 
 %environment
-    export PATH="/opt/conda/bin:$PATH"
 
 %post 
-    export PATH="/opt/conda/bin:$PATH"
-
     python -m pip install --upgrade pip
     pip install --upgrade setuptools
 
@@ -49,9 +46,26 @@ From: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0
     conda install -yq cmake flex bison lit
     conda install -yq pybind11 -c conda-forge
 
-    # install sample factory
+    # install render_utils
     cd /dungeons/
-    pip install .[dev,atari,nethack,mrunner]
+    pybind11_INCLUDE_DIR=/opt/conda/share/cmake/pybind11
+    cd sf_examples/nethack/render_utils
+    pip install -e .
+    cd ../../..
+
+    # install sample factory
+    pip install .[dev,nethack,mrunner,atari]
+
+    # install NLE
+    git clone https://github.com/BartekCupial/nle.git nle && cd nle \
+    && git checkout fair_nle && git submodule init && git submodule update --recursive \
+    && sed '/#define NLE_ALLOW_SEEDING 1/i#define NLE_ALLOW_SEEDING 1' include/nleobs.h -i \
+    && sed '/self\.nethack\.set_initial_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.set_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.get_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/def seed(self, core=None, disp=None, reseed=True):/d' nle/env/tasks.py -i \
+    && sed '/raise RuntimeError("NetHackChallenge doesn.t allow seed changes")/d' nle/env/tasks.py -i \
+    && python setup.py install && cd .. 
 
     chmod a+rw -R /opt/conda/bin/python
 

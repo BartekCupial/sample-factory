@@ -603,9 +603,10 @@ def add_model_args(p: ArgumentParser):
         help="Type of RNN cell to use if use_rnn is True",
     )
     p.add_argument(
-        "--nanogpt_recurrent_mode",
-        default=False,
-        type=str2bool,
+        "--nanogpt_time_mixing",
+        default="window_attention",
+        type=str,
+        choices=["autoregressive_attention", "lru", "window_attention", "gru", "identity"],
     )
     p.add_argument(
         "--nanogpt_block_size",
@@ -638,7 +639,7 @@ def add_model_args(p: ArgumentParser):
         "--nanogpt_attention_type",
         default="softmax",
         type=str,
-        choices=["softmax", "linear", "elu"],
+        choices=["none", "softmax", "linear", "elu"],
     )
     p.add_argument(
         "--nanogpt_constant_context",

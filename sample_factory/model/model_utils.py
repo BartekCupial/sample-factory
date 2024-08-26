@@ -19,8 +19,19 @@ def get_rnn_size(cfg):
     elif cfg.rnn_type == "mamba":
         size = (cfg.rnn_num_layers * cfg.rnn_d_model * cfg.mamba_expand) * (cfg.mamba_conv_size + cfg.mamba_state_size)
     elif cfg.rnn_type == "nanogpt":
-        if cfg.nanogpt_recurrent_mode:
+        if cfg.nanogpt_time_mixing == "autoregressive_attention":
             size = cfg.rnn_num_layers * cfg.rnn_d_model * (cfg.rnn_d_model + 1) + 1  # Timestep
+        elif cfg.nanogpt_time_mixing == "lru":
+            conv_width = 4  # hardcoded for now
+            size = (cfg.rnn_num_layers * cfg.rnn_d_model  # LRU state
+                    + cfg.rnn_num_layers * (conv_width - 1) * cfg.rnn_d_model  # Conv
+                    + 1)  # Timestep
+        elif cfg.nanogpt_time_mixing == "gru":
+            size = (cfg.rnn_num_layers * cfg.rnn_d_model  # GRU state
+                    + 1)  # Timestep
+        elif cfg.nanogpt_time_mixing == "identity":
+            size = cfg.rnn_num_layers * cfg.nanogpt_block_size + 1
+        # Window attention
         else:
             size = cfg.nanogpt_block_size * (cfg.rnn_d_model + 2)
 

@@ -9,6 +9,7 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 
 import math
 import inspect
+from collections import namedtuple
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -18,7 +19,17 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
-# TODO: allow different embeddings 
+RecurrentBlockCache = namedtuple("RecurrentBlockCache", ["rg_lru_state", "conv1d_state"])
+
+def init_weights(module):
+    if isinstance(module, nn.Linear):
+        torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        if module.bias is not None:
+            torch.nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding):
+        torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+
 class Phi(nn.Module):
     def forward(self, x):
         return torch.nn.functional.elu(x) + 1
@@ -34,6 +45,18 @@ class SumAggregation(nn.Module):
         memory: torch.Tensor,
     ) -> torch.Tensor:
         return x.cumsum(dim=1).clamp(-1e20, 1e20) + memory
+
+
+class Identity(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        pass
+
+    def init_weights(self):
+        pass
+
+    def forward(self, x, state, *args, **kwargs):
+        return x, state
 
 
 class LinearAttention(nn.Module):
@@ -60,6 +83,9 @@ class LinearAttention(nn.Module):
         self.dropout = config.dropout
         self.S_aggregator = SumAggregation()
         self.Z_aggregator = SumAggregation()
+
+    def init_weights(self):
+        self.apply(init_weights)
 
     # TODO: what about the number of heads here?
     def forward(
@@ -203,6 +229,9 @@ class CausalSelfAttention(nn.Module):
         else:
             self.use_rope = False
 
+    def init_weights(self):
+        self.apply(init_weights)
+
     def forward(self, x, state=None, mask=None):
         # Context is a dummy variable for compatibility with the LinearAttention module
 
@@ -268,10 +297,14 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
+    def init_weights(self):
+        init_weights(self.c_fc)
+        init_weights(self.c_proj)
+
 
 class Block(nn.Module):
 
-    def __init__(self, config, block_idx, attention_cls, use_layer_norm=True):
+    def __init__(self, config, block_idx, time_mixing_cls, use_layer_norm=True):
         super().__init__()
 
         if use_layer_norm:
@@ -281,7 +314,7 @@ class Block(nn.Module):
             self.ln_1 = nn.Identity()
             self.ln_2 = nn.Identity()
 
-        self.attn = attention_cls(config)
+        self.time_mixing = time_mixing_cls(config)
         self.mlp = MLP(config)
         self.block_idx = block_idx
 
@@ -290,7 +323,7 @@ class Block(nn.Module):
         if state is not None:
             current_state = state[self.block_idx]
 
-        y, current_state = self.attn(self.ln_1(x), current_state, context_mask)
+        y, current_state = self.time_mixing(self.ln_1(x), current_state, context_mask)
 
         if state is not None:
             state[self.block_idx] = current_state
@@ -298,6 +331,10 @@ class Block(nn.Module):
         x = x + y
         x = x + self.mlp(self.ln_2(x))
         return x, state
+
+    def init_weights(self):
+        self.mlp.init_weights()
+        self.time_mixing.init_weights()
 
 
 @dataclass
@@ -313,7 +350,7 @@ class GPTConfig:
     context_len: int = 32
     embedding_type: str = "table"  # table, linear, rope, sine
     relative_timesteps: bool = True  # use absolute timestep idx or relative (t=0 is start of the trajectory vs t=0 is the start of the chunk)
-    constant_context: bool = True
+    constant_context: bool = False
     attention_type: str = "softmax"  # softmax, linear
     two_layer_norms: bool = True
 
@@ -339,7 +376,7 @@ class GPT(nn.Module):
             "input_projection": nn.Linear(config.input_size, config.d_model, bias=config.bias),
             "output_projection": nn.Linear(config.d_model, config.output_size, bias=config.bias),
             "drop": nn.Dropout(config.dropout),
-            "h": nn.ModuleList([Block(config, block_idx, self.attention_cls) for block_idx in range(config.num_layers)]),
+            "h": nn.ModuleList([Block(config, block_idx, self.time_mixing_cls) for block_idx in range(config.num_layers)]),
             "ln_f": LayerNorm(config.d_model, bias=config.bias),
         }
 
@@ -349,13 +386,7 @@ class GPT(nn.Module):
             self.wpe = wpe
 
         self.transformer = nn.ModuleDict(transformer_modules)
-
-        # init all weights
-        self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.num_layers))
+        self.init_weights()
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
@@ -372,13 +403,18 @@ class GPT(nn.Module):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    def init_weights(self):
+        # init all weights
+        init_weights(self.transformer["input_projection"])
+        init_weights(self.transformer["output_projection"])
+
+        for block in self.transformer["h"]:
+            block.init_weights()
+
+        # apply special scaled init to the residual projections, per GPT-2 paper
+        for pn, p in self.named_parameters():
+            if pn.endswith('c_proj.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.num_layers))
 
     def forward(self, x, context):
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
@@ -417,16 +453,20 @@ class GPT(nn.Module):
         elif self.config.embedding_type == "rope":
             pos_emb = torch.zeros(context.shape[0], context.shape[1], self.config.d_model,
                                   device=context.device, dtype=context.dtype)
+        elif self.config.embedding_type == "none":
+            pos_emb = 0
         return pos_emb  # [bs, seqlen, d_model]
 
     def _forward(self, x, context, context_mask, context_timesteps):
         new_batch_size, new_seqlen, _ = x.size()
-        if isinstance(context, list):
-            old_batch_size = context[0][0].shape[0]
-        else:
-            old_batch_size = context.shape[0]
+        # if isinstance(context, list):
+        #     old_batch_size = context[0][0].shape[0]
+        # elif isinstance(context, ReurrentBlockCache):
+        #     old_batch_size = context.state[0].shape[0]
+        # else:
+        #     old_batch_size = context.shape[0]
 
-        assert old_batch_size == new_batch_size, f"Batch size mismatch: {old_batch_size} != {new_batch_size}"
+        # assert old_batch_size == new_batch_size, f"Batch size mismatch: {old_batch_size} != {new_batch_size}"
         # forward the GPT model itself
         x = self.transformer.input_projection(x)  # shape (b, t, d_model)
 
@@ -500,13 +540,20 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+    def _unpack_context(self, context, new_seqlen, device):
+        raise NotImplementedError
+
+    def _pack_context(self, context, context_mask, context_timesteps):
+        raise NotImplementedError
+
 
 class ContextWindowGPT(GPT):
     def __init__(self, config):
-        self.attention_cls = CausalSelfAttention
+        self.time_mixing_cls = CausalSelfAttention
         self.window_transformer = True
         super().__init__(config)
         assert config.attention_type in ["linear", "softmax"]
+
 
     def _unpack_context(self, context, new_seqlen, device):
         # reshape and unpack context:
@@ -545,11 +592,11 @@ class ContextWindowGPT(GPT):
 
 class AutoregressiveGPT(GPT):
     def __init__(self, config):
-        self.attention_cls = LinearAttention
+        self.time_mixing_cls = LinearAttention
         self.window_transformer = False
         super().__init__(config)
 
-        assert config.attention_type in ["linear", "elu"]
+        assert config.attention_type in ["identity", "linear", "elu"]
 
         # TODO: implement something rope-like for LinearTransformer
         if self.config.embedding_type == "rope":
@@ -582,6 +629,45 @@ class AutoregressiveGPT(GPT):
         # [num_layers, B, -1]
         state = torch.stack(state, dim=0)
         state = state.transpose(0, 1)
+        state = state.reshape(state.shape[0], -1)
+        # Take last timestep from each batch
+        state_timesteps = state_timesteps[:, -1]
+        state = torch.cat([state, state_timesteps.view(-1, 1)], dim=1)
+        return state
+
+class IdentityGPT(GPT):
+    def __init__(self, config):
+        self.time_mixing_cls = Identity
+        self.window_transformer = False
+        super().__init__(config)
+
+        assert config.attention_type == "none"
+
+        # TODO: implement something rope-like for LinearTransformer
+        if self.config.embedding_type == "rope":
+            raise ValueError("RecurrentGPT does not support RoPE embeddings")
+
+    def _unpack_context(self, state, new_seqlen=None, device=None):
+        # [batch_size]
+        timesteps = state[:, -1]
+        state = state[:, :-1]
+
+        current_timesteps = timesteps.view(-1, 1) + torch.arange(new_seqlen, device=timesteps.device).view(1, -1)
+
+        # [B, -1] -> [B, num_layers, -1]
+        state = state.reshape(state.shape[0], self.config.num_layers, -1)
+        # [B, num_layers, -1] -> [num_layers, B, -1]
+        state = state.transpose(0, 1)
+
+        mask = torch.ones_like(current_timesteps, dtype=torch.bool)
+        return state, mask, current_timesteps
+
+    def _pack_context(self, state, state_mask, state_timesteps):
+        # [num_layers, B, -1]
+        # state = torch.stack(state, dim=0)
+        # [B, num_layers, -1]
+        state = state.transpose(0, 1)
+        # [B, -1]
         state = state.reshape(state.shape[0], -1)
         # Take last timestep from each batch
         state_timesteps = state_timesteps[:, -1]
