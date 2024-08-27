@@ -1,7 +1,7 @@
 from itertools import cycle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Tuple
-
+import logging
 # import nle.dataset as nld
 import numpy as np
 import torch
@@ -137,14 +137,44 @@ class DatasetLearner(Learner):
         return init_model_data
 
     def _get_dataset(self):
-        # TODO: this has to be a batched iterator
-        dataset = np.load(self.cfg.dataset_name)
-        dataset = torch.utils.data.TensorDataset(
-                torch.from_numpy(dataset["observations"]),
-                torch.from_numpy(dataset["actions"]))
-        dataset = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, shuffle=True)
+        # # TODO: this has to be a batched iterator
+        # dataset = np.load(self.cfg.dataset_name)
+        # dataset = torch.utils.data.TensorDataset(
+        #         torch.from_numpy(dataset["observations"]),
+        #         torch.from_numpy(dataset["actions"]))
+        # dataset = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, shuffle=True)
+        # return dataset
 
-        return dataset
+        class MultiFileDataset(torch.utils.data.Dataset):
+            def __init__(self, file_prefix):
+                self.file_prefix = file_prefix
+                self.file_index = 0
+                self.data = None
+                self.actions = None
+                self.load_next_file()
+
+            def load_next_file(self):
+                file_path = f"{self.file_prefix}_{self.file_index}.npz"
+                try:
+                    data = np.load(file_path)
+                    self.data = torch.from_numpy(data["observations"])
+                    self.actions = torch.from_numpy(data["actions"])
+                    self.file_index += 1
+                except FileNotFoundError:
+                    raise IndexError("Dataset exhausted")
+
+            def __len__(self):
+                return self.data.shape[0]
+
+            def __getitem__(self, idx):
+                if idx >= len(self):
+                    self.load_next_file()
+                    idx = idx % len(self)
+                return self.data[idx], self.actions[idx]
+
+        dataset = MultiFileDataset(self.cfg.dataset_name)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, shuffle=True)
+        return dataloader
 
     def result(self):
         return self._results[self.idx].result()

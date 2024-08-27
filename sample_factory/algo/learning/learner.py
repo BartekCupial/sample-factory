@@ -985,7 +985,6 @@ class Learner(Configurable):
             normalized_last_obs = buff["normalized_obs"][:, -1]
             next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)["values"]
             buff["values"][:, -1] = next_values
-            log.debug("Set buff[\"values\"] to 0")
             if self.cfg.remove_critic:
                 buff["values"][:]=0
 
