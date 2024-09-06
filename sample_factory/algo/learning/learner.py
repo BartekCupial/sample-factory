@@ -896,10 +896,22 @@ class Learner(Configurable):
         stats.valids_fraction = var.mb.valids.float().mean()
         stats.same_policy_fraction = (var.mb.policy_id == self.policy_id).float().mean()
 
-        grad_norm = (
-            sum(p.grad.data.norm(2).item() ** 2 for p in self.actor_critic.parameters() if p.grad is not None) ** 0.5
-        )
-        stats.grad_norm = grad_norm
+        per_layer_grad_norms = {
+            name: p.grad.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+            if p.grad is not None
+        }
+        stats.grad_norm = sum(p ** 2 for p in per_layer_grad_norms.values()) ** 0.5
+
+        per_layer_param_norms = {
+            name: p.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+        }
+        stats.param_norm = sum(p ** 2 for p in per_layer_param_norms.values()) ** 0.5
+        if self.train_step % 100 == 0:
+            stats.per_layer_grad_norms = per_layer_grad_norms
+            stats.per_layer_param_norms = per_layer_param_norms
+
         stats.loss = var.loss
         stats.value = var.values.mean()
         stats.entropy = var.action_distribution.entropy().mean()
@@ -963,8 +975,11 @@ class Learner(Configurable):
         stats.version_diff_min = version_diff.min()
         stats.version_diff_max = version_diff.max()
 
-        for key, value in stats.items():
-            stats[key] = to_scalar(value)
+        for key, value in stats.copy().items():  # Avoid overriting the dict
+            if not isinstance(value, dict):
+                stats[key] = to_scalar(value)
+            else:
+                stats[key] = value
 
         return stats
 
@@ -1110,8 +1125,7 @@ class Learner(Configurable):
 
             stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
             if train_stats is not None:
-                if train_stats is not None:
-                    stats[TRAIN_STATS] = train_stats
+                stats[TRAIN_STATS] = train_stats
                 stats[STATS_KEY] = memory_stats("learner", self.device)
 
             return stats

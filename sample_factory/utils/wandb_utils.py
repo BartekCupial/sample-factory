@@ -56,6 +56,8 @@ def init_wandb(cfg):
     wandb.config.update(cfg, allow_val_change=True)
 
     wandb.define_metric("train/env_steps")
+    wandb.define_metric("per_layer_grad_norms", step_metric="train/env_steps")
+    wandb.define_metric("per_layer_param_norms", step_metric="train/env_steps")
     wandb.define_metric("train/*", step_metric="train/env_steps")
     wandb.define_metric("perf/*", step_metric="train/env_steps")
     wandb.define_metric("len/*", step_metric="train/env_steps")

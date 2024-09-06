@@ -28,22 +28,23 @@ config = {
     "process_seq_in_batch_mode": True,
 
     # Athena
-    "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
-    "with_wandb": True,
+    # "batch_size": 4096,  # this equals bs = 128, 128 * 32 = 4096
+    # "with_wandb": True,
 
     # Local
-    # "batch_size": 64,  # this equals bs = 128, 128 * 32 = 4096
-    # "with_wandb": True,
+    "batch_size": 64,  # this equals bs = 128, 128 * 32 = 4096
+    "with_wandb": False,
 }
 
 # params different between exps
 params_grid = [
-    # {
-    #     "seed": list(range(5)),
-    #     "rnn_type": ["lstm"],
-    #     "learning_rate": [1e-5, 5e-5],
-    #     "rnn_size": [512],
-    # },
+    {
+        "seed": list(range(5)),
+        "rnn_type": ["lstm"],
+        "learning_rate": [1e-5, 5e-5],
+        "rnn_d_model": [512],
+        "rnn_d_output": [512],
+    },
     # {
     #     "seed": list(range(5)),
     #     "rnn_type": ["mamba"],
@@ -55,22 +56,22 @@ params_grid = [
     #     "mamba_use_complex": [False],
     #     "mamba_model_size": [256],
     # },
-    {
-        "seed": list(range(5)),
-        "rnn_type": ["nanogpt"],
-        "rnn_size": [512],
-        "learning_rate": [1e-4, 5e-4, 1e-3],
-        "rollout": [16, 32, 64],
-        "nanogpt_model_size": [256],
-        "rnn_num_layers": [3],
-        "nanogpt_n_head": [8],
-        "nanogpt_dropout": [0.],
-        "nanogpt_embedding_type": ["rope"],
-        "nanogpt_relative_timesteps": [True],
-        "nanogpt_constant_context": [False],
-        "nanogpt_block_size": [256],
-        "nanogpt_attention_type": ["linear"],
-    },
+    # {
+    #     "seed": list(range(5)),
+    #     "rnn_type": ["nanogpt"],
+    #     "rnn_size": [512],
+    #     "learning_rate": [1e-4, 5e-4, 1e-3],
+    #     "rollout": [16, 32, 64],
+    #     "nanogpt_model_size": [256],
+    #     "rnn_num_layers": [3],
+    #     "nanogpt_n_head": [8],
+    #     "nanogpt_dropout": [0.],
+    #     "nanogpt_embedding_type": ["rope"],
+    #     "nanogpt_relative_timesteps": [True],
+    #     "nanogpt_constant_context": [False],
+    #     "nanogpt_block_size": [256],
+    #     "nanogpt_attention_type": ["linear"],
+    # },
 ]
 
 experiments_list = create_experiments_helper(

@@ -23,7 +23,7 @@ config = {
     "num_epochs": 1,
 
     # Rnn settings
-    "rollout": 128,
+    "roleout": 128,
     "use_rnn": True,
     "rnn_d_output": 256,
     "rnn_d_model": 256,

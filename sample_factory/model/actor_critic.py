@@ -228,10 +228,8 @@ class ActorCriticSeparateWeights(ActorCritic):
         """
         num_cores = len(self.cores)
 
-        # times 2 because we need hidden and cell
-        # TODO: handle GRU
-        self.rnn_hidden_sizes = [core.core.hidden_size * 2 for core in self.cores]
-        rnn_states_split = rnn_states.split(self.rnn_hidden_sizes, dim=1)
+        # TODO: assume same size actor and critic for now
+        rnn_states_split = rnn_states.chunk(num_cores, dim=1)
 
         if isinstance(head_output, PackedSequence):
             # We cannot chunk PackedSequence directly, we first have to to unpack it,
@@ -291,8 +289,9 @@ class ActorCriticSeparateWeights(ActorCritic):
         return self.core_func(head_output, rnn_states)
 
     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        core_outputs = core_output.split(self.core_outputs_sizes, dim=1)
-        # core_outputs = core_output.chunk(len(self.cores), dim=1)
+        # TODO: change when actor and critic are different
+        # core_outputs = core_output.split(self.core_outputs_sizes, dim=1)
+        core_outputs = core_output.chunk(len(self.cores), dim=1)
 
         # second core output corresponds to the critic
         critic_decoder_output = self.critic_decoder(core_outputs[1])

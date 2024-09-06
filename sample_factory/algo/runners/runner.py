@@ -288,7 +288,13 @@ class Runner(EventLoopObject, Configurable):
         """We write the train summaries to disk right away instead of accumulating them."""
         train_stats = msg[TRAIN_STATS]
         for key, scalar in train_stats.items():
-            runner.writers[policy_id].add_scalar(f"train/{key}", scalar, runner.env_steps[policy_id])
+            # If we encounter dict, do not put it in "train/"
+            if isinstance(scalar, dict):
+                for sub_key, sub_scalar in scalar.items():
+                    runner.writers[policy_id].add_scalar(f"{key}/{sub_key}", sub_scalar, runner.env_steps[policy_id])
+
+            else:
+                runner.writers[policy_id].add_scalar(f"train/{key}", scalar, runner.env_steps[policy_id])
 
         for key in ["version_diff_min", "version_diff_max", "version_diff_avg"]:
             if key in train_stats:
