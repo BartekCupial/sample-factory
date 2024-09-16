@@ -522,6 +522,39 @@ class Learner(Configurable):
         kl_prior = torch.clamp(kl_prior, max=30)
         kl_prior_loss = self.cfg.exploration_loss_coeff * kl_prior
         return kl_prior_loss
+    
+    def _calculate_neuron_score_all_layers(self, activations):
+        all_layers_score = {}
+
+        for layer_name, activations_values in activations.items():
+            mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (num_neurons,)
+            neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
+            all_layers_score[layer_name] = neuron_scores
+        return all_layers_score
+
+    def _dead_neurons(self, tau):
+        actor_activations = self.actor_critic.actor_activations
+        critic_activations = self.actor_critic.critic_activations
+
+        actor_scores = self._calculate_neuron_score_all_layers(actor_activations)
+        critic_scores = self._calculate_neuron_score_all_layers(critic_activations)
+
+        actor_dead_neurons = 0
+        actor_neurons = 0
+
+        critic_dead_neurons = 0
+        critic_neurons = 0
+
+        for layer_name, layer_scores in actor_scores.items():
+            num_dead_neurons = (layer_scores <= tau).sum().item()     
+            actor_dead_neurons += num_dead_neurons
+            actor_neurons += layer_scores.shape[0]
+
+        for layer_name, layer_scores in critic_scores.items():
+            num_dead_neurons = (layer_scores <= tau).sum().item()     
+            critic_dead_neurons += num_dead_neurons
+            critic_neurons += layer_scores.shape[0]
+        return actor_neurons, actor_dead_neurons, critic_neurons, critic_dead_neurons
 
     def _optimizer_lr(self):
         for param_group in self.optimizer.param_groups:
@@ -704,7 +737,13 @@ class Learner(Configurable):
             adv_mean=adv_mean,
         )
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        actor_neurons, actor_dead_neurons, critic_neurons, critic_dead_neurons = self._dead_neurons(0.1) #self.cfg.tau
+        actor_dead_neurons_percentage = actor_dead_neurons/actor_neurons*100
+        critic_dead_neurons_percentage = critic_dead_neurons/critic_neurons*100
+        dead_neurons_total = actor_dead_neurons + critic_dead_neurons
+        dead_neurons_percentage = dead_neurons_total/(actor_neurons+critic_neurons)*100
+        
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, actor_dead_neurons, critic_dead_neurons, dead_neurons_total, actor_dead_neurons_percentage, critic_dead_neurons_percentage, dead_neurons_percentage, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -768,6 +807,12 @@ class Learner(Configurable):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        actor_dead_neurons, 
+                        critic_dead_neurons, 
+                        dead_neurons_total, 
+                        actor_dead_neurons_percentage, 
+                        critic_dead_neurons_percentage, 
+                        dead_neurons_percentage,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
