@@ -74,11 +74,25 @@ class MlpEncoder(Encoder):
         super().__init__(cfg)
 
         mlp_layers: List[int] = cfg.encoder_mlp_layers
+        self.activations = {}
+        
         self.mlp_head = create_mlp(mlp_layers, obs_space.shape[0], nonlinearity(cfg))
+        self.register_hooks()
+        
         if len(mlp_layers) > 0:
             self.mlp_head = torch.jit.script(self.mlp_head)
         self.encoder_out_size = calc_num_elements(self.mlp_head, obs_space.shape)
+    
+    def register_hooks(self):
+        for name, layer in self.named_modules():
+            if isinstance(layer, (nn.Conv2d, nn.Linear)):                
+                layer.register_forward_hook(self.save_activations_hook(name))
 
+    def save_activations_hook(self, layer_name):
+        def hook(module, input, output):
+            self.activations["encoder_" + layer_name] = output
+        return hook
+    
     def forward(self, obs: Tensor):
         x = self.mlp_head(obs)
         return x
