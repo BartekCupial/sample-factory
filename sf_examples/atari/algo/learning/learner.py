@@ -74,21 +74,18 @@ class DatasetLearner(Learner):
             self.tp = ThreadPoolExecutor(max_workers=self.cfg.dataset_num_workers)
 
             def _make_sing_iter(dataset):
-                dataset = cycle(iter(dataset))
+                dataset_iter = cycle(iter(dataset))  # Infinite cycling dataset iterator
 
                 def _iter():
-
-                    while True:
-                        obs, action = next(dataset)
-
-                        # override dones which may or may not be set correctly in dataset
+                    for obs, action in dataset_iter:  # Keep yielding batches indefinitely
+                        # Override 'done' field in the batch
                         batch = {
                             "obs": obs,
                             "actions": action,
                             "done": torch.zeros_like(action),
                         }
 
-                        # ensure that we don't overrite data
+                        # Normalize the batch
                         normalized_batch = prepare_and_normalize_obs(self.actor_critic, batch)
                         normalized_batch = clone_tensordict(TensorDict(normalized_batch))
 
@@ -164,13 +161,17 @@ class DatasetLearner(Learner):
                 return len(self.indices)
 
             def __getitem__(self, idx):
+
                 # Retrieve the correct file and internal index
                 file_idx, internal_idx = self.indices[idx]
-                h5_file = self.h5_files[file_idx]
+                with h5py.File(self.hdf5_files[file_idx], 'r') as h5_file:
+                    observations = h5_file['observations'][internal_idx]
+                    actions = h5_file['actions'][internal_idx]
+                # h5_file = self.h5_files[file_idx]
 
                 # Access data in the HDF5 file
-                observations = h5_file['observations'][internal_idx]
-                actions = h5_file['actions'][internal_idx]
+                # observations = h5_file['observations'][internal_idx]
+                # actions = h5_file['actions'][internal_idx]
 
                 # Convert data to torch tensors
                 observations = torch.tensor(observations, dtype=torch.float32)
