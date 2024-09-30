@@ -1,13 +1,13 @@
 from itertools import cycle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Tuple
-import logging
 import h5py
 # import nle.dataset as nld
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+import tracemalloc
 
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
@@ -145,44 +145,29 @@ class DatasetLearner(Learner):
 
         class MultiFileDataset(torch.utils.data.Dataset):
             def __init__(self, hdf5_files):
-                logging.info(f"Initializing MultiFileDataset with {len(hdf5_files)} files")
                 self.hdf5_files = hdf5_files
                 self.indices = []
-                self.h5_files = []  # Store the file handles
 
-                # Open the HDF5 files and store the handles
                 for file_idx, hdf5_file in enumerate(self.hdf5_files):
-                    h5_file = h5py.File(hdf5_file, 'r')
-                    self.h5_files.append(h5_file)
-                    array_len = len(h5_file['actions'])  # Assumes 'actions' exists in all files
-                    self.indices.extend([(file_idx, i) for i in range(array_len)])
+                    with h5py.File(hdf5_file, 'r') as h5_file:
+                        log.debug(f"Processing trajectory {file_idx}")
+                        array_len = len(h5_file['actions'])
+                        self.indices.extend([(file_idx, i) for i in range(array_len)])
 
             def __len__(self):
                 return len(self.indices)
 
             def __getitem__(self, idx):
 
-                # Retrieve the correct file and internal index
                 file_idx, internal_idx = self.indices[idx]
                 with h5py.File(self.hdf5_files[file_idx], 'r') as h5_file:
                     observations = h5_file['observations'][internal_idx]
                     actions = h5_file['actions'][internal_idx]
-                # h5_file = self.h5_files[file_idx]
 
-                # Access data in the HDF5 file
-                # observations = h5_file['observations'][internal_idx]
-                # actions = h5_file['actions'][internal_idx]
-
-                # Convert data to torch tensors
                 observations = torch.tensor(observations, dtype=torch.float32)
                 actions = torch.tensor(actions, dtype=torch.long)
 
                 return observations, actions
-
-            def __del__(self):
-                # Close all the HDF5 files when the dataset is deleted
-                for h5_file in self.h5_files:
-                    h5_file.close()
 
         h5_list = self.cfg.dataset_name[1:-1]
         h5_files = [f.replace("'", "").strip() for f in h5_list.split(',') if f]
