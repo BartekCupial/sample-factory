@@ -2,6 +2,7 @@ from itertools import cycle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Tuple
 import h5py
+# import tracemalloc
 # import nle.dataset as nld
 import numpy as np
 import torch
@@ -73,23 +74,22 @@ class DatasetLearner(Learner):
             self.dataset = self._get_dataset()
             self.tp = ThreadPoolExecutor(max_workers=self.cfg.dataset_num_workers)
 
-            def _make_sing_iter(dataset):
-                dataset_iter = cycle(iter(dataset))  # Infinite cycling dataset iterator
-
+            def _make_sing_iter(dataloader):
                 def _iter():
-                    for obs, action in dataset_iter:  # Keep yielding batches indefinitely
-                        # Override 'done' field in the batch
-                        batch = {
-                            "obs": obs,
-                            "actions": action,
-                            "done": torch.zeros_like(action),
-                        }
+                    while True:
+                        for obs, action in dataloader:  # Keep yielding batches indefinitely
+                            # Override 'done' field in the batch
+                            batch = {
+                                "obs": obs,
+                                "actions": action,
+                                "done": torch.zeros_like(action),
+                            }
 
-                        # Normalize the batch
-                        normalized_batch = prepare_and_normalize_obs(self.actor_critic, batch)
-                        normalized_batch = clone_tensordict(TensorDict(normalized_batch))
+                            # Normalize the batch
+                            normalized_batch = prepare_and_normalize_obs(self.actor_critic, batch)
+                            normalized_batch = clone_tensordict(TensorDict(normalized_batch))
 
-                        yield normalized_batch
+                            yield normalized_batch
 
                 return iter(_iter())
 
@@ -145,25 +145,42 @@ class DatasetLearner(Learner):
 
         class MultiFileDataset(torch.utils.data.Dataset):
             def __init__(self, hdf5_files):
+                log.debug(f"Initializing MultiFileDataset with {len(hdf5_files)} files")
                 self.hdf5_files = hdf5_files
                 self.indices = []
 
+                # for file_idx, hdf5_file in enumerate(self.hdf5_files):
+                #     with h5py.File(hdf5_file, 'r') as h5_file:
+                #         log.debug(f"Processing trajectory {file_idx}")
+                #         array_len = len(h5_file['actions'])
+                #         self.indices.extend([(file_idx, i) for i in range(array_len)])
+
+                self.h5_files = []  # Store the file handles
+
+                # Open the HDF5 files and store the handles
                 for file_idx, hdf5_file in enumerate(self.hdf5_files):
-                    with h5py.File(hdf5_file, 'r') as h5_file:
-                        log.debug(f"Processing trajectory {file_idx}")
-                        array_len = len(h5_file['actions'])
-                        self.indices.extend([(file_idx, i) for i in range(array_len)])
+                    h5_file = h5py.File(hdf5_file, 'r')
+                    self.h5_files.append(h5_file)
+                    array_len = len(h5_file['actions'])  # Assumes 'actions' exists in all files
+                    self.indices.extend([(file_idx, i) for i in range(array_len)])
 
             def __len__(self):
                 return len(self.indices)
 
             def __getitem__(self, idx):
 
+                # Retrieve the correct file and internal index
                 file_idx, internal_idx = self.indices[idx]
                 with h5py.File(self.hdf5_files[file_idx], 'r') as h5_file:
                     observations = h5_file['observations'][internal_idx]
                     actions = h5_file['actions'][internal_idx]
+                # h5_file = self.h5_files[file_idx]
 
+                # Access data in the HDF5 file
+                # observations = h5_file['observations'][internal_idx]
+                # actions = h5_file['actions'][internal_idx]
+
+                # Convert data to torch tensors
                 observations = torch.tensor(observations, dtype=torch.float32)
                 actions = torch.tensor(actions, dtype=torch.long)
 
@@ -667,7 +684,14 @@ class DatasetLearner(Learner):
                     synchronize(self.cfg, self.device)
                     # this will force policy update on the inference worker (policy worker)
                     self.policy_versions_tensor[self.policy_id] = self.train_step
+            
+                # snapshot = tracemalloc.take_snapshot()
+                # top_stats = snapshot.statistics('lineno')
 
+                # log.debug("[Top 10 memory-consuming lines]")
+                # for stat in top_stats[:10]:
+                #     log.debug(stat)
+                
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():
                 self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
@@ -689,6 +713,7 @@ class DatasetLearner(Learner):
         return stats_and_summaries
 
     def train(self, batch: TensorDict) -> Optional[Dict]:
+        # tracemalloc.start()
         if self.cfg.save_milestones_ith > 0 and self.env_steps // self.cfg.save_milestones_ith > self.checkpoint_steps:
             self.save_milestone()
             self.checkpoint_steps = self.env_steps // self.cfg.save_milestones_ith
