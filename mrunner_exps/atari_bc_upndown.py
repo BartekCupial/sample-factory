@@ -21,7 +21,7 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari_bbf",
-    "wandb_group": "upndown bc 150 bigger memory",
+    "wandb_group": "upndown bc 300",
 
     "use_dataset": True,
     "dataset_rollout": 32,
@@ -33,8 +33,8 @@ config = {
     "batch_size": 32,
     "dataset_batch_size": 128,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
-    "serial_mode": True,
-    "device": "cpu",
+    "serial_mode": False,
+    "device": "gpu",
     "heartbeat_reporting_interval": 1800,
 }
 
@@ -48,7 +48,7 @@ for atari_game in atari_games:
     params_grid += [
         {
             "seed": list(range(1)),
-            "dataset_name": [[f"/mnt/PyTorch-BBF-Bigger-Better-Faster-Atari-100k/data/UpNDown/trajectory_{i}.h5" for i in range(150)]],
+            "dataset_name": [[f"/mnt/PyTorch-BBF-Bigger-Better-Faster-Atari-100k/data/UpNDown/trajectory_{i}.h5" for i in range(300)]],
             "env": [f"atari_{atari_game}"],
             "learning_rate": [1e-3, 
                              1e-4,
