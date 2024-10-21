@@ -15,6 +15,18 @@ from sample_factory.utils.utils import log
 class Encoder(ModelModule):
     def __init__(self, cfg: Config):
         super().__init__(cfg)
+        # self.activations = {}
+        # self.register_hooks()
+
+    def register_hooks(self):
+        for name, layer in self.named_modules():
+            if isinstance(layer, (nn.Conv2d, nn.Linear)):
+                layer.register_forward_hook(self.save_activations_hook(name))
+
+    def save_activations_hook(self, layer_name):
+        def hook(module, input, output):
+            self.activations["encoder_" + layer_name] = output
+        return hook
 
     def get_out_size(self) -> int:
         raise NotImplementedError()

@@ -381,7 +381,7 @@ class DatasetLearner(Learner):
         all_layers_score = {}
 
         for layer_name, activations_values in activations.items():
-            mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (num_neurons,)
+            mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
             neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
             all_layers_score[layer_name] = neuron_scores
         return all_layers_score
@@ -403,7 +403,7 @@ class DatasetLearner(Learner):
         neurons_dict = {}  
         dead_neurons_dict = {}
         dead_neurons_pct_dict = {}
-        
+
         for module_name, activations_dict in activations.items():
             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
             for layer_name, layer_scores in all_layers_scores.items():
@@ -411,10 +411,10 @@ class DatasetLearner(Learner):
                 num_dead_neurons = (layer_scores <= tau).sum().item()
 
                 neurons_dict[module_name + '__' + layer_name] = num_neurons
-                dead_neurons_dict[module_name + '__' + layer_name] = num_dead_neurons
-                dead_neurons_pct_dict[module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-
-        return neurons_dict, dead_neurons_dict, dead_neurons_pct_dict 
+                dead_neurons_dict['n_dead__' + '__' + layer_name] = num_dead_neurons
+                dead_neurons_pct_dict['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
+                log.debug(f"{module_name}: {num_dead_neurons}/{num_neurons}")
+        return dead_neurons_dict, dead_neurons_pct_dict 
 
 
     def _calculate_losses(
@@ -519,7 +519,7 @@ class DatasetLearner(Learner):
             accuracy=to_scalar(accuracy),
         )
 
-        neurons_dict, dead_neurons_dict, dead_neurons_pct_dict = self._dead_neurons(self.cfg.tau)
+        dead_neurons_dict, dead_neurons_pct_dict = self._dead_neurons(self.cfg.tau) 
 
         return (
             action_distribution,
@@ -529,7 +529,6 @@ class DatasetLearner(Learner):
             kl_loss,
             value_loss,
             loss_summaries,
-            neurons_dict, 
             dead_neurons_dict, 
             dead_neurons_pct_dict,
             regularizer_loss,
@@ -615,7 +614,6 @@ class DatasetLearner(Learner):
                         kl_loss,
                         value_loss,
                         loss_summaries,
-                        neurons_dict, 
                         dead_neurons_dict, 
                         dead_neurons_pct_dict,
                         regularizer_loss,
@@ -729,7 +727,7 @@ class DatasetLearner(Learner):
                     should_record_summaries |= force_summaries
                     if should_record_summaries:
                         # hacky way to collect all of the intermediate variables for summaries
-                        summary_vars = {**locals(), **loss_summaries, **neurons_dict, **dead_neurons_dict, **dead_neurons_pct_dict}
+                        summary_vars = {**locals(), **loss_summaries}
                         stats_and_summaries = self._record_summaries(AttrDict(summary_vars))
                         # dont have a better way to do this then to modify record summaries
                         for key, value in regularizer_loss_summaries.items():

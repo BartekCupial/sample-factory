@@ -7,6 +7,7 @@ from torch import nn
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
 from sample_factory.utils.typing import Config
+from sample_factory.utils.utils import log
 
 
 class Decoder(ModelModule, ABC):
@@ -17,20 +18,21 @@ class MlpDecoder(Decoder):
     def __init__(self, cfg: Config, decoder_input_size: int):
         super().__init__(cfg)
         self.core_input_size = decoder_input_size
-        decoder_layers: List[int] = cfg.decoder_mlp_layers
+        decoder_layers: List[int] = cfg.c
         activation = nonlinearity(cfg)
 
         self.mlp = create_mlp(decoder_layers, decoder_input_size, activation)
         self.activations = {}
         self.register_hooks()
-        if len(decoder_layers) > 0:
-            self.mlp = torch.jit.script(self.mlp)
+        # if len(decoder_layers) > 0:
+        #     self.mlp = torch.jit.script(self.mlp)
 
         self.decoder_out_size = calc_num_elements(self.mlp, (decoder_input_size,))
 
     def register_hooks(self):
         for name, layer in self.named_modules():
-            if isinstance(layer, (nn.Conv2d, nn.Linear)):                
+            # if isinstance(layer, (nn.Conv2d, nn.Linear)):
+            if isinstance(layer, (nn.Linear)):
                 layer.register_forward_hook(self.save_activations_hook(name))
 
     def save_activations_hook(self, layer_name):
