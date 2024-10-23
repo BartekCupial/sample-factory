@@ -381,6 +381,8 @@ class DatasetLearner(Learner):
         all_layers_score = {}
 
         for layer_name, activations_values in activations.items():
+            # batch_size = min(256, activations_values.shape[0])
+            # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
             mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
             neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
             all_layers_score[layer_name] = neuron_scores

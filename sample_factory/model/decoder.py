@@ -18,7 +18,7 @@ class MlpDecoder(Decoder):
     def __init__(self, cfg: Config, decoder_input_size: int):
         super().__init__(cfg)
         self.core_input_size = decoder_input_size
-        decoder_layers: List[int] = cfg.c
+        decoder_layers: List[int] = cfg.decoder_mlp_layers
         activation = nonlinearity(cfg)
 
         self.mlp = create_mlp(decoder_layers, decoder_input_size, activation)
