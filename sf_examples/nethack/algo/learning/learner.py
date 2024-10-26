@@ -377,6 +377,39 @@ class DatasetLearner(Learner):
             valids=valids,
         )
 
+
+    def effective_rank(self, srank_threshold):
+            if self.actor_critic.decoder.last_linear_layer is not None:
+                last_layer = self.actor_critic.decoder.last_linear_layer
+                features = self.actor_critic.decoder.activations["decoder_" + last_layer] 
+            elif self.actor_critic.encoder.last_linear_layer is not None:
+                last_layer = self.actor_critic.encoder.last_linear_layer
+                features = self.actor_critic.encoder.activations["encoder_" + last_layer]
+            else:
+                raise ValueError("Both Encoder and Decoder lack linear layers!") 
+
+            U, S, V = torch.linalg.svd(features)
+
+            # Effective feature rank is the number of normalized singular values
+            # such that their cumulative sum is greater than some epsilon.
+            assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
+            s_sum = torch.sum(S)
+
+            # Catch case where the regularizer has collapsed the network features
+            # This makes the training not crash entirely when rank collapse occurs
+            if np.isclose(s_sum.item(), 0.0):
+                # Break tie through random selection of two singular values
+                indices = torch.randperm(len(S))[:2]
+                s_min, s_max = S[indices]
+                return torch.zeros(1), s_min, s_max
+            else:
+                S_normalized = S / s_sum
+                S_cum = torch.cumsum(S_normalized, dim=-1)
+                # Get the first index where the rank threshold is exceeded
+                k = (S_cum > srank_threshold).nonzero()[0]
+                return k, S.min(), S.max()
+
+
     def _calculate_losses(
         self,
         mb: AttrDict,
@@ -479,6 +512,9 @@ class DatasetLearner(Learner):
             accuracy=to_scalar(accuracy),
         )
 
+        rank, _, _ = self.effective_rank(self.cfg.delta)
+        log.debug(f"Effective Rank: {rank}")
+
         return (
             action_distribution,
             policy_loss,
@@ -487,6 +523,7 @@ class DatasetLearner(Learner):
             kl_loss,
             value_loss,
             loss_summaries,
+            rank,
             regularizer_loss,
             regularizer_loss_summaries,
         )
@@ -570,6 +607,7 @@ class DatasetLearner(Learner):
                         kl_loss,
                         value_loss,
                         loss_summaries,
+                        rank,
                         regularizer_loss,
                         regularizer_loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)

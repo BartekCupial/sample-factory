@@ -908,6 +908,9 @@ class Learner(Configurable):
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
 
+        # Log effective rank
+        stats.effective_rank = var.rank
+
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()
 
