@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import tracemalloc
 
+
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution
@@ -33,20 +34,20 @@ from sf_examples.atari.models.utils import freeze_selected, unfreeze_selected
 # from sf_examples.nethack.datasets.roles import Alignment, Race, Role
 # from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected
 
+
 class MultiFileDataset(torch.utils.data.Dataset):
     def __init__(self, hdf5_files):
         log.debug(f"Initializing MultiFileDataset with {len(hdf5_files)} files")
         self.hdf5_files = hdf5_files
         self.indices = []
 
-        self.h5_files = []  # Store the file handles
+        # self.h5_files = []  # Store the file handles
 
         # Open the HDF5 files and store the handles
         for file_idx, hdf5_file in enumerate(self.hdf5_files):
-            h5_file = h5py.File(hdf5_file, 'r')
-            self.h5_files.append(h5_file)
-            array_len = len(h5_file['actions'])  # Assumes 'actions' exists in all files
-            self.indices.extend([(file_idx, i) for i in range(array_len)])
+            with h5py.File(hdf5_file, 'r') as h5_file:
+                array_len = len(h5_file['actions'])
+                self.indices.extend([(file_idx, i) for i in range(array_len)])
 
     def __len__(self):
         return len(self.indices)
@@ -166,50 +167,11 @@ class DatasetLearner(Learner):
         return init_model_data
 
     def _get_dataset(self):
-        # # TODO: this has to be a batched iterator
-        # dataset = np.load(self.cfg.dataset_name)
-        # dataset = torch.utils.data.TensorDataset(
-        #         torch.from_numpy(dataset["observations"]),
-        #         torch.from_numpy(dataset["actions"]))
-        # dataset = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, shuffle=True)
-        # return dataset
-
-        # class MultiFileDataset(torch.utils.data.Dataset):
-        #     def __init__(self, hdf5_files):
-        #         log.debug(f"Initializing MultiFileDataset with {len(hdf5_files)} files")
-        #         self.hdf5_files = hdf5_files
-        #         self.indices = []
-
-        #         self.h5_files = []  # Store the file handles
-
-        #         # Open the HDF5 files and store the handles
-        #         for file_idx, hdf5_file in enumerate(self.hdf5_files):
-        #             h5_file = h5py.File(hdf5_file, 'r')
-        #             self.h5_files.append(h5_file)
-        #             array_len = len(h5_file['actions'])  # Assumes 'actions' exists in all files
-        #             self.indices.extend([(file_idx, i) for i in range(array_len)])
-
-        #     def __len__(self):
-        #         return len(self.indices)
-
-        #     def __getitem__(self, idx):
-
-        #         # Retrieve the correct file and internal index
-        #         file_idx, internal_idx = self.indices[idx]
-        #         with h5py.File(self.hdf5_files[file_idx], 'r') as h5_file:
-        #             observations = h5_file['observations'][internal_idx]
-        #             actions = h5_file['actions'][internal_idx]
-
-        #         # Convert data to torch tensors
-        #         observations = torch.tensor(observations, dtype=torch.float32)
-        #         actions = torch.tensor(actions, dtype=torch.long)
-
-        #         return observations, actions
-
+            
         h5_list = self.cfg.dataset_name[1:-1]
         h5_files = [f.replace("'", "").strip() for f in h5_list.split(',') if f]
         dataset = MultiFileDataset(h5_files)  # now it should be a list of files!
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, shuffle=True)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, num_workers=4, shuffle=True)
         return dataloader
     
     def result(self):
