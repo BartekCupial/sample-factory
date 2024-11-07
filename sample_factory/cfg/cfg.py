@@ -246,6 +246,12 @@ def add_rl_args(p: ArgumentParser):
         help="Generalized Advantage Estimation discounting (only used when V-trace is False)",
     )
     p.add_argument(
+        "--hierarchical_gamma",
+        default=False,
+        type=str2bool,
+        help="Accounts for extra discounting when controlling high level policy.",
+    )
+    p.add_argument(
         "--ppo_clip_ratio",
         default=0.1,
         type=float,

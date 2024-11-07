@@ -18,7 +18,7 @@ from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STATS_KEY, TRAIN_STATS, memory_stats
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.optimizers import Lamb
-from sample_factory.algo.utils.rl_utils import gae_advantages, prepare_and_normalize_obs
+from sample_factory.algo.utils.rl_utils import gae_advantages, gae_advantages_conditioned, prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
 from sample_factory.algo.utils.tensor_dict import TensorDict, shallow_recursive_copy
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
@@ -991,14 +991,26 @@ class Learner(Configurable):
 
             if not self.cfg.with_vtrace:
                 # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
-                buff["advantages"] = gae_advantages(
-                    buff["rewards"],
-                    buff["dones"],
-                    denormalized_values,
-                    buff["valids"],
-                    self.cfg.gamma,
-                    self.cfg.gae_lambda,
-                )
+                if self.cfg.hierarchical_gamma:
+                    assert "strategy_steps" in buff["normalized_obs"], "Hierarchical gamma requires strategy steps"
+                    buff["advantages"] = gae_advantages_conditioned(
+                        buff["rewards"],
+                        buff["dones"],
+                        denormalized_values,
+                        buff["valids"],
+                        self.cfg.gamma,
+                        self.cfg.gae_lambda,
+                        buff["normalized_obs"]["strategy_steps"].squeeze(),
+                    )
+                else:
+                    buff["advantages"] = gae_advantages(
+                        buff["rewards"],
+                        buff["dones"],
+                        denormalized_values,
+                        buff["valids"],
+                        self.cfg.gamma,
+                        self.cfg.gae_lambda,
+                    )
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
 
