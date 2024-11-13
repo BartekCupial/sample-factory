@@ -171,7 +171,7 @@ class DatasetLearner(Learner):
         h5_list = self.cfg.dataset_name[1:-1]
         h5_files = [f.replace("'", "").strip() for f in h5_list.split(',') if f]
         dataset = MultiFileDataset(h5_files)  # now it should be a list of files!
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, num_workers=4, shuffle=True)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.cfg.dataset_batch_size, num_workers=8, shuffle=True)
         return dataloader
     
     def result(self):

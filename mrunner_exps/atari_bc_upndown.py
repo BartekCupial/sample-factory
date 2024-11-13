@@ -6,7 +6,7 @@ name = globals()["script"][:-3]
 config = {
     "exp_tags": [name],
 
-    "train_for_env_steps": 25_000_000,
+    "train_for_env_steps": 10_000_000,
     "group": "monk-APPO-KLAA-T",
 
     "num_workers": 4,
@@ -21,7 +21,7 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari_bbf",
-    "wandb_group": "upndown bc 300",
+    "wandb_group": "upndown bc 300 tune",
 
     "use_dataset": True,
     "dataset_rollout": 32,
@@ -50,10 +50,11 @@ for atari_game in atari_games:
             "seed": list(range(1)),
             "dataset_name": [[f"/mnt/PyTorch-BBF-Bigger-Better-Faster-Atari-100k/data/UpNDown/trajectory_{i}.h5" for i in range(300)]],
             "env": [f"atari_{atari_game}"],
-            "learning_rate": [1e-3, 
-                             1e-4,
-                             1e-5,
-                              ],
+            "learning_rate": [ 1e-5,
+                # 1e-3, 1e-4,
+                ],
+            "supervised_loss_coeff": [0.5, 1.0],
+            "supervised_loss_decay": [0.5, 1.0],
         }
     ]
 
