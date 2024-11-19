@@ -53,8 +53,8 @@ for atari_game in atari_games:
             "learning_rate": [ 1e-5,
                 # 1e-3, 1e-4,
                 ],
-            "supervised_loss_coeff": [0.5, 1.0],
-            "supervised_loss_decay": [0.5, 1.0],
+            "encoder_mlp_layers": [[512,512], [512,512,512], [1024,1024]],
+            "decoder_mlp_layers": [[512], [1024], [512,512]],
         }
     ]
 
