@@ -21,7 +21,7 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari_bbf",
-    "wandb_group": "upndown bc 300 tune",
+    "wandb_group": "upndown bc 500",
 
     "use_dataset": True,
     "dataset_rollout": 32,
@@ -48,12 +48,12 @@ for atari_game in atari_games:
     params_grid += [
         {
             "seed": list(range(1)),
-            "dataset_name": [[f"/mnt/PyTorch-BBF-Bigger-Better-Faster-Atari-100k/data/UpNDown/trajectory_{i}.h5" for i in range(300)]],
+            "dataset_name": [[f"/mnt/PyTorch-BBF-Bigger-Better-Faster-Atari-100k/data/UpNDown/trajectory_{i}.h5" for i in range(500)]],
             "env": [f"atari_{atari_game}"],
             "learning_rate": [ 1e-5,
                 # 1e-3, 1e-4,
                 ],
-            "encoder_mlp_layers": [[512,512], [512,512,512], [1024,1024]],
+            "encoder_conv_mlp_layers": [[512,512], [512,512,512], [1024,1024]],
             "decoder_mlp_layers": [[512], [1024], [512,512]],
         }
     ]
