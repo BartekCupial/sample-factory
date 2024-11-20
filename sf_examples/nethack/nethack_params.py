@@ -123,6 +123,8 @@ def add_extra_params_general(parser):
     p.add_argument("--learning_rate_groups", type=ast.literal_eval, default=None)
     p.add_argument("--critic_increase_factor", type=float, default=1)
     p.add_argument("--tau", type=float, default=0.1)
+    p.add_argument("--delta", type=float, default=0.01)  # threshold for effective rank
+
 
 def nethack_override_defaults(_env, parser):
     """RL params specific to NetHack envs."""

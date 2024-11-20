@@ -23,6 +23,7 @@ class MlpDecoder(Decoder):
 
         self.mlp = create_mlp(decoder_layers, decoder_input_size, activation)
         self.activations = {}
+        self.last_linear_layer = None
         self.register_hooks()
         # if len(decoder_layers) > 0:
         #     self.mlp = torch.jit.script(self.mlp)
@@ -33,6 +34,7 @@ class MlpDecoder(Decoder):
         for name, layer in self.named_modules():
             # if isinstance(layer, (nn.Conv2d, nn.Linear)):
             if isinstance(layer, (nn.Linear)):
+                self.last_linear_layer = name
                 layer.register_forward_hook(self.save_activations_hook(name))
 
     def save_activations_hook(self, layer_name):

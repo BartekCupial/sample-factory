@@ -914,6 +914,8 @@ class Learner(Configurable):
 
         for layer in var['dead_neurons_pct_dict'].keys():
             stats[layer] = var['dead_neurons_pct_dict'][layer]
+        # Log effective rank
+        stats.effective_rank = var.rank
 
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()

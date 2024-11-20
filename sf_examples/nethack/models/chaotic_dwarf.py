@@ -273,6 +273,7 @@ class ChaoticDwarvenGPT5(Encoder):
             self.num_actions = None
             self.prev_actions_dim = 0
 
+        self.last_linear_layer = None
         self.register_hooks()
 
         # Remove jit.script -- doesn't work well with hooks
@@ -288,6 +289,19 @@ class ChaoticDwarvenGPT5(Encoder):
                 self.prev_actions_dim,
             ]
         )
+        log.debug(f"Init complete. Last linear layer: {self.last_linear_layer}")
+
+    def register_hooks(self):
+        for name, layer in self.named_modules():
+            # if isinstance(layer, (nn.Conv2d, nn.Linear)):
+            if isinstance(layer, (nn.Linear)):
+                self.last_linear_layer = name
+                layer.register_forward_hook(self.save_activations_hook(name))
+
+    def save_activations_hook(self, layer_name):
+        def hook(module, input: Tuple[torch.Tensor], output):
+            self.activations["encoder_" + layer_name] = output
+        return hook
 
     def register_hooks(self):
         for name, layer in self.named_modules():
