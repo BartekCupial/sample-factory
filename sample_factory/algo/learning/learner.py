@@ -989,7 +989,7 @@ class Learner(Configurable):
             if not self.cfg.with_vtrace:
                 # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
                 if self.cfg.hierarchical_gamma:
-                    assert "strategy_steps" in buff["normalized_obs"], "Hierarchical gamma requires strategy steps"
+                    assert "env_steps" in buff["normalized_obs"], "Hierarchical gamma requires strategy steps"
                     buff["advantages"] = gae_advantages_conditioned(
                         buff["rewards"],
                         buff["dones"],
@@ -997,7 +997,7 @@ class Learner(Configurable):
                         buff["valids"],
                         self.cfg.gamma,
                         self.cfg.gae_lambda,
-                        buff["normalized_obs"]["strategy_steps"].squeeze(),
+                        buff["normalized_obs"]["env_steps"].squeeze(),
                     )
                 else:
                     buff["advantages"] = gae_advantages(
@@ -1060,12 +1060,15 @@ class Learner(Configurable):
             with self.timing.add_time("train"):
                 train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
 
-            # multiply the number of samples by frameskip so that FPS metrics reflect the number
-            # of environment steps actually simulated
-            if self.cfg.summaries_use_frameskip:
-                self.env_steps += experience_size * self.env_info.frameskip
+            if "env_steps" in buff["normalized_obs"]:
+                self.env_steps += buff["normalized_obs"]["env_steps"].sum().item()
             else:
-                self.env_steps += experience_size
+                # multiply the number of samples by frameskip so that FPS metrics reflect the number
+                # of environment steps actually simulated
+                if self.cfg.summaries_use_frameskip:
+                    self.env_steps += experience_size * self.env_info.frameskip
+                else:
+                    self.env_steps += experience_size
 
             stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
             if train_stats is not None:
