@@ -217,7 +217,11 @@ class BatchedVectorEnvRunner(VectorEnvRunner):
         num_dones = dones.sum().item()
 
         self.curr_episode_reward += rewards
-        self.curr_episode_len += self.env_info.frameskip if self.cfg.summaries_use_frameskip else 1
+        if "env_steps" in infos["episode_extra_stats"]:
+            for i, info in enumerate(infos):
+                self.curr_episode_len[i] += infos[i]["env_steps"]
+        else:
+            self.curr_episode_len += self.env_info.frameskip if self.cfg.summaries_use_frameskip else 1
 
         reports = []
         if num_dones <= 0:

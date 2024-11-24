@@ -197,8 +197,11 @@ class ActorState:
         policy_id = -1 if not self.is_active else self.curr_policy_id
         self.curr_traj_buffer["policy_id"][rollout_step] = policy_id
 
-        # multiply by frameskip to get the episode lenghts matching the actual number of simulated steps
-        self.last_episode_duration += self.env_info.frameskip if self.cfg.summaries_use_frameskip else 1
+        if "env_steps" in info["episode_extra_stats"]:
+            self.last_episode_duration += info["episode_extra_stats"]["env_steps"]
+        else:
+            # multiply by frameskip to get the episode lenghts matching the actual number of simulated steps
+            self.last_episode_duration += self.env_info.frameskip if self.cfg.summaries_use_frameskip else 1
 
         self.is_active = info.get("is_active", True)
 
