@@ -21,7 +21,9 @@ config = {
     "with_wandb": True,
     "wandb_user": "ideas-ncbr",
     "wandb_project": "nethack_plasticity",
-    "wandb_group": "plasticity, large exp",
+    "wandb_group": "plasticity, large exp v2",
+    "heartbeat_reporting_interval": 1800,
+
 }
 
 # params different between exps
