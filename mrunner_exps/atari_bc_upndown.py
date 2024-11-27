@@ -55,7 +55,7 @@ for atari_game in atari_games:
                 ],
             "encoder_conv_mlp_layers": [[512,512], [512,512,512], [1024,1024]],
             "decoder_mlp_layers": [[], [512]],
-            "encoder_conv_scale": [1, 2],
+            "encoder_conv_scale": [2],
         }
     ]
 

@@ -132,7 +132,7 @@ class ConvEncoder(Encoder):
         elif cfg.encoder_conv_architecture == "convnet_impala":
             conv_filters = [[input_channels, 16, 8, 4], [16, 32, 4, 2]]
         elif cfg.encoder_conv_architecture == "convnet_atari":
-            conv_filters = [[input_channels, 32*cfg.encoder_conv_scale, 8, 4], [32, 64*cfg.encoder_conv_scale, 4, 2], [64, 64*cfg.encoder_conv_scale, 3, 1]]
+            conv_filters = [[input_channels, 32*cfg.encoder_conv_scale, 8, 4], [32*cfg.encoder_conv_scale, 64*cfg.encoder_conv_scale, 4, 2], [64*cfg.encoder_conv_scale, 64*cfg.encoder_conv_scale, 3, 1]]
         else:
             raise NotImplementedError(f"Unknown encoder architecture {cfg.encoder_conv_architecture}")
 
