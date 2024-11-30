@@ -15,7 +15,7 @@ from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STA
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import alloc_trajectory_tensors
-from sample_factory.algo.utils.tensor_dict import TensorDict, clone_tensordict, stack_tensordicts
+from sample_factory.algo.utils.tensor_dict import TensorDict, clone_tensordict, stack_tensordicts, tensor_dict_to_cpu
 from sample_factory.algo.utils.tensor_utils import ensure_torch_tensor
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.model.model_utils import get_rnn_size
@@ -136,7 +136,7 @@ class DatasetLearner(Learner):
                 ]
             )
             <= 1
-        ), "only one regularization loss allowed at the time"
+        ), f"only one regularization loss allowed at the time, use_kickstarting_loss: {use_kickstarting_loss}, use_distillation_loss: {use_distillation_loss}, use_supervised_loss: {use_supervised_loss}."
 
         assert (
             use_supervised_loss or use_distillation_loss or self.cfg.calc_accuracy
@@ -260,122 +260,6 @@ class DatasetLearner(Learner):
         kickstarting_loss = kickstarting_loss.mean()
 
         return kickstarting_loss
-
-    def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
-        with torch.no_grad(), self.timing.add_time("losses_init"):
-            recurrence: int = self.cfg.recurrence
-            valids = mb.valids
-
-        # calculate policy head outside of recurrent loop
-        with self.timing.add_time("forward_head"):
-            head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
-            minibatch_size: int = head_outputs.size(0)
-
-        # initial rnn states
-        with self.timing.add_time("bptt_initial"):
-            if self.cfg.use_rnn:
-                # this is the only way to stop RNNs from backpropagating through invalid timesteps
-                # (i.e. experience collected by another policy)
-                done_or_invalid = torch.logical_or(mb.dones_cpu, ~valids.cpu()).float()
-                head_output_seq, rnn_states, inverted_select_inds = build_rnn_inputs(
-                    head_outputs,
-                    done_or_invalid,
-                    mb.rnn_states,
-                    recurrence,
-                )
-            else:
-                rnn_states = mb.rnn_states[::recurrence]
-
-        # calculate RNN outputs for each timestep in a loop
-        with self.timing.add_time("bptt"):
-            if self.cfg.use_rnn:
-                with self.timing.add_time("bptt_forward_core"):
-                    core_output_seq, _ = self.actor_critic.forward_core(head_output_seq, rnn_states)
-                core_outputs = build_core_out_from_seq(core_output_seq, inverted_select_inds)
-                del core_output_seq
-            else:
-                core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
-
-            del head_outputs
-
-        num_trajectories = minibatch_size // recurrence
-        assert core_outputs.shape[0] == minibatch_size
-
-        with self.timing.add_time("tail"):
-            # calculate policy tail outside of recurrent loop
-            result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
-            action_distribution = self.actor_critic.action_distribution()
-            log_prob_actions = action_distribution.log_prob(mb.actions)
-            ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
-
-            # super large/small values can cause numerical problems and are probably noise anyway
-            ratio = torch.clamp(ratio, 0.05, 20.0)
-
-            values = result["values"].squeeze()
-
-            del core_outputs
-
-        # these computations are not the part of the computation graph
-        with torch.no_grad(), self.timing.add_time("advantages_returns"):
-            if self.cfg.with_vtrace:
-                # V-trace parameters
-                rho_hat = torch.Tensor([self.cfg.vtrace_rho])
-                c_hat = torch.Tensor([self.cfg.vtrace_c])
-
-                ratios_cpu = ratio.cpu()
-                values_cpu = values.cpu()
-                rewards_cpu = mb.rewards_cpu
-                dones_cpu = mb.dones_cpu
-
-                vtrace_rho = torch.min(rho_hat, ratios_cpu)
-                vtrace_c = torch.min(c_hat, ratios_cpu)
-
-                vs = torch.zeros((num_trajectories * recurrence))
-                adv = torch.zeros((num_trajectories * recurrence))
-
-                next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
-                next_values /= self.cfg.gamma
-                next_vs = next_values
-
-                for i in reversed(range(self.cfg.recurrence)):
-                    rewards = rewards_cpu[i::recurrence]
-                    dones = dones_cpu[i::recurrence]
-                    not_done = 1.0 - dones
-                    not_done_gamma = not_done * self.cfg.gamma
-
-                    curr_values = values_cpu[i::recurrence]
-                    curr_vtrace_rho = vtrace_rho[i::recurrence]
-                    curr_vtrace_c = vtrace_c[i::recurrence]
-
-                    delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
-                    adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
-                    next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
-                    vs[i::recurrence] = next_vs
-
-                    next_values = curr_values
-
-                targets = vs.to(self.device)
-                adv = adv.to(self.device)
-            else:
-                # using regular GAE
-                adv = mb.advantages
-                targets = mb.returns
-
-            adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
-            adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
-            if self.cfg.clip_adv:
-                adv = torch.clamp(adv, -self.cfg.clip_adv, self.cfg.clip_adv)
-
-        return dict(
-            result=result,
-            ratio=ratio,
-            adv=adv,
-            adv_std=adv_std,
-            adv_mean=adv_mean,
-            values=values,
-            targets=targets,
-            valids=valids,
-        )
 
     def _calculate_losses(
         self,
@@ -731,6 +615,10 @@ class DatasetLearner(Learner):
         with self.timing.add_time("prepare_batch"):
             if self.env_steps >= self.cfg.skip_train:
                 buff, experience_size, num_invalids = self._prepare_batch(batch)
+
+                if self.cfg.aux_train:
+                    aux_buff = tensor_dict_to_cpu(buff)
+                    self.aux_batch.append((aux_buff, experience_size, num_invalids))
             else:
                 experience_size = batch["dones"].shape[0] * batch["dones"].shape[1]
                 num_invalids = 0
@@ -750,6 +638,20 @@ class DatasetLearner(Learner):
                         experience_size,
                         num_invalids,
                     )
+
+                    if self.cfg.aux_train and len(self.aux_batch) == self.cfg.aux_train_frequency:
+                        with self.timing.add_time("aux_train"):
+                            aux_buff, aux_experience_size, aux_num_invalids = self._prepare_aux_batch(self.aux_batch)
+                            aux_train_stats = self._aux_train(
+                                aux_buff, self.cfg.aux_batch_size, aux_experience_size, aux_num_invalids, True
+                            )
+                            # update train stats with aux_train_stats
+                            if aux_train_stats is not None:
+                                if train_stats is not None:
+                                    train_stats.update(**aux_train_stats)
+                                else:
+                                    train_stats = aux_train_stats
+                            self.aux_batch = []
                 else:
                     train_stats = None
 
