@@ -94,6 +94,7 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         savedir=cfg.savedir,
         save_ttyrec_every=cfg.save_ttyrec_every,
         gameloaddir=gameloaddir,
+        render_mode=render_mode,
     )
     if env_name == "challenge":
         kwargs["no_progress_timeout"] = 150
@@ -130,20 +131,20 @@ def make_nethack_env(env_name, cfg, env_config, render_mode: Optional[str] = Non
         env = VariablesInfoWrapper(env)
         env = NetHackRewardShapingWrapper(env, GAME_REWARD)
 
-    # convert gym env to gymnasium one, due to issues with render NLE in reset
-    gymnasium_env = GymV21CompatibilityV0(env=env)
+    # # convert gym env to gymnasium one, due to issues with render NLE in reset
+    # gymnasium_env = GymV21CompatibilityV0(env=env)
 
-    # preserving potential multi-agent env attributes
-    if hasattr(env, "num_agents"):
-        gymnasium_env.num_agents = env.num_agents
-    if hasattr(env, "is_multiagent"):
-        gymnasium_env.is_multiagent = env.is_multiagent
-    env = gymnasium_env
+    # # preserving potential multi-agent env attributes
+    # if hasattr(env, "num_agents"):
+    #     gymnasium_env.num_agents = env.num_agents
+    # if hasattr(env, "is_multiagent"):
+    #     gymnasium_env.is_multiagent = env.is_multiagent
+    # env = gymnasium_env
 
     env = patch_non_gymnasium_env(env)
 
-    if render_mode:
-        env.render_mode = render_mode
+    # if render_mode:
+    #     env.render_mode = render_mode
 
     if cfg.serial_mode and cfg.num_workers == 1:
         # full reproducability can only be achieved in serial mode and when there is only 1 worker

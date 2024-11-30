@@ -3,18 +3,28 @@ import sys
 from os.path import join
 from typing import Callable
 
+import torch
+import torch.nn as nn
+
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.utils.context import global_model_factory, sf_global_context
+from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.cfg.arguments import load_from_path, parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
 from sample_factory.model.encoder import Encoder
+from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.train import run_rl
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log
 from sf_examples.nethack.algo.learning.learner import DatasetLearner
 from sf_examples.nethack.models import MODELS_LOOKUP
 from sf_examples.nethack.models.kickstarter import KickStarter
+from sf_examples.nethack.models.utils import (
+    inject_layernorm_before_activation,
+    linear_layernorm,
+    replace_batchnorm_with_layernorm,
+)
 from sf_examples.nethack.nethack_env import NETHACK_ENVS, make_nethack_env
 from sf_examples.nethack.nethack_params import (
     add_extra_params_general,
@@ -63,7 +73,8 @@ def load_pretrained_checkpoint(model, checkpoint_dir: str, checkpoint_kind: str,
         del checkpoint_dict["model"]["returns_normalizer.running_var"]
         del checkpoint_dict["model"]["returns_normalizer.count"]
 
-    model.load_state_dict(checkpoint_dict["model"])
+    incompatibile = model.load_state_dict(checkpoint_dict["model"], strict=False)
+    log.debug(incompatibile)
 
 
 def load_pretrained_checkpoint_from_shared_weights(
@@ -84,17 +95,60 @@ def load_pretrained_checkpoint_from_shared_weights(
     cfg.actor_critic_share_weights = False
     tmp_model: ActorCritic = create_model(cfg, obs_space, action_space)
 
+    # returns normalizer
     tmp_model.returns_normalizer = copy.deepcopy(model_shared.returns_normalizer)
+
+    # actor weights
     tmp_model.actor_encoder = copy.deepcopy(model_shared.encoder)
     tmp_model.actor_core = copy.deepcopy(model_shared.core)
-    tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
-    tmp_model.critic_core = copy.deepcopy(model_shared.core)
     tmp_model.actor_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
-    tmp_model.critic_linear = copy.deepcopy(model_shared.critic_linear)
     tmp_model.action_parameterization = copy.deepcopy(model_shared.action_parameterization)
 
+    # we want to keep random critic when using layernorm
+    if not cfg.critic_add_layernorm:
+        # critic weights
+        tmp_model.critic_encoder = copy.deepcopy(model_shared.encoder)
+        tmp_model.critic_core = copy.deepcopy(model_shared.core)
+        tmp_model.critic_decoder = copy.deepcopy(model_shared.decoder)
+        tmp_model.critic = copy.deepcopy(model_shared.critic)
+
     model.load_state_dict(tmp_model.state_dict())
+
+    if cfg.critic_add_layernorm:
+        # ensude that we don't modify batchnorm weights in the actor
+        model.train(mode=False)
+
+        handles = []
+
+        def register_hooks(model):
+            def hook(module, input, output):
+                module.output_shape = output.shape
+                # print(f"{module.__class__.__name__} output shape: {output.shape}")
+
+            for name, child in model.named_children():
+                if isinstance(child, (nn.Linear, nn.Conv1d, nn.Conv2d)):
+                    handle = child.register_forward_hook(hook)
+                    handles.append(handle)
+                else:
+                    register_hooks(child)
+
+        register_hooks(model)
+        tmp_env = make_env_func_batched(cfg, env_config=None)
+        obs, info = tmp_env.reset()
+        rnn_states = torch.zeros([1, get_rnn_size(cfg)], dtype=torch.float32)
+        model(obs, rnn_states)
+
+        if cfg.critic_replace_bn_with_ln:
+            replace_batchnorm_with_layernorm(model.critic_encoder)
+        inject_layernorm_before_activation(model.critic_encoder)
+
+        inject_layernorm_before_activation(model.critic)
+        model.critic.critic_linear = linear_layernorm(model.critic.critic_linear)
+
+        for handle in handles:
+            handle.remove()
+
+        model.train(mode=True)
 
 
 def make_nethack_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:

@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 
 from sf_examples.nethack.utils.task_rewards import (
     EatingScore,
@@ -26,28 +26,28 @@ class TaskRewardsInfoWrapper(gym.Wrapper):
         ]
 
     def reset(self, **kwargs):
-        obs = self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
 
         for task in self.tasks:
             task.reset_score()
 
-        return obs
+        return obs, info
 
     def step(self, action):
         # use tuple and copy to avoid shallow copy (`last_observation` would be the same as `observation`)
         last_observation = tuple(a.copy() for a in self.env.unwrapped.last_observation)
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         observation = tuple(a.copy() for a in self.env.unwrapped.last_observation)
         end_status = info["end_status"]
 
-        if done:
+        if terminated or truncated:
             info["episode_extra_stats"] = self.add_more_stats(info)
 
         # we will accumulate rewards for each step and log them when done signal appears
         for task in self.tasks:
             task.reward(self.env.unwrapped, last_observation, observation, end_status)
 
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
     def add_more_stats(self, info):
         extra_stats = info.get("episode_extra_stats", {})
