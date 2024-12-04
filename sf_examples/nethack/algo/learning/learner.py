@@ -417,6 +417,20 @@ class DatasetLearner(Learner):
                 dead_neurons_pct_dict['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
                 log.debug(f"{module_name}: {num_dead_neurons}/{num_neurons}")
         return dead_neurons_dict, dead_neurons_pct_dict 
+    
+    def grad_and_param_norms(self):
+        per_layer_grad_norms = {
+            name: p.grad.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+            if p.grad is not None
+        }
+
+        per_layer_param_norms = {
+            name: p.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+        }
+
+        return per_layer_grad_norms, per_layer_param_norms
 
     def effective_rank(self, srank_threshold):
             if self.actor_critic.decoder.last_linear_layer is not None:
@@ -555,6 +569,7 @@ class DatasetLearner(Learner):
         dead_neurons_dict, dead_neurons_pct_dict = self._dead_neurons(self.cfg.tau) 
         rank, _, _ = self.effective_rank(self.cfg.delta)
         log.debug(f"Effective Rank: {rank}")
+        per_layer_grad_norms, per_layer_param_norms = self.grad_and_param_norms()
 
         return (
             action_distribution,
@@ -567,6 +582,8 @@ class DatasetLearner(Learner):
             dead_neurons_dict, 
             dead_neurons_pct_dict,
             rank,
+            per_layer_grad_norms,
+            per_layer_param_norms,
             regularizer_loss,
             regularizer_loss_summaries,
         )
@@ -653,6 +670,8 @@ class DatasetLearner(Learner):
                         dead_neurons_dict, 
                         dead_neurons_pct_dict,
                         rank,
+                        per_layer_grad_norms,
+                        per_layer_param_norms,
                         regularizer_loss,
                         regularizer_loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
