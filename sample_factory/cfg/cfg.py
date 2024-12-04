@@ -540,8 +540,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--encoder_conv_mlp_layers",
         default=[512],
-        type=int,
-        nargs="*",
+        type=ast.literal_eval,
         help="Optional fully connected layers after the convolutional encoder head.",
     )
 

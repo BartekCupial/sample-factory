@@ -27,10 +27,12 @@ import torch
 from nle import nethack
 from torch import nn
 from torch.nn import functional as F
+from typing import Tuple, Dict
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.encoder import Encoder
 from sample_factory.utils.typing import Config, ObsSpace
+from sample_factory.utils.utils import log
 
 
 class MessageEncoder(nn.Module):
@@ -238,6 +240,8 @@ class ChaoticDwarvenGPT5(Encoder):
         self.obs_keys = list(sorted(obs_space.keys()))  # always the same order
         self.encoders = nn.ModuleDict()
 
+        self.activations = {}
+
         self.use_tty_only = cfg.use_tty_only
         self.use_prev_action = cfg.use_prev_action
 
@@ -247,18 +251,18 @@ class ChaoticDwarvenGPT5(Encoder):
             screen_shape = (24 * pixel_size, 80 * pixel_size)
         else:
             screen_shape = (cfg.crop_dim * pixel_size, cfg.crop_dim * pixel_size)
-        self.screen_encoder = torch.jit.script(ScreenEncoder(screen_shape))
+        self.screen_encoder = ScreenEncoder(screen_shape)
         screen_shape = obs_space["screen_image"].shape
 
         # top and bottom encoders
         if self.use_tty_only:
             self.topline_encoder = TopLineEncoder()
-            self.bottomline_encoder = torch.jit.script(BottomLinesEncoder())
+            self.bottomline_encoder = BottomLinesEncoder()
             topline_shape = (obs_space["tty_chars"].shape[1],)
             bottomline_shape = (2 * obs_space["tty_chars"].shape[1],)
         else:
-            self.topline_encoder = torch.jit.script(MessageEncoder())
-            self.bottomline_encoder = torch.jit.script(BLStatsEncoder())
+            self.topline_encoder = MessageEncoder()
+            self.bottomline_encoder = BLStatsEncoder()
             topline_shape = obs_space["message"].shape
             bottomline_shape = obs_space["blstats"].shape
 
@@ -269,6 +273,14 @@ class ChaoticDwarvenGPT5(Encoder):
             self.num_actions = None
             self.prev_actions_dim = 0
 
+        self.last_linear_layer = None
+        self.register_hooks()
+
+        # Remove jit.script -- doesn't work well with hooks
+        # self.screen_encoder = torch.jit.script(self.screen_encoder)
+        # self.topline_encoder = torch.jit.script(self.topline_encoder)
+        # self.bottomline_encoder = torch.jit.script(self.bottomline_encoder)
+
         self.encoder_out_size = sum(
             [
                 calc_num_elements(self.screen_encoder, screen_shape),
@@ -277,6 +289,19 @@ class ChaoticDwarvenGPT5(Encoder):
                 self.prev_actions_dim,
             ]
         )
+        log.debug(f"Init complete. Last linear layer: {self.last_linear_layer}")
+
+    def register_hooks(self):
+        for name, layer in self.named_modules():
+            # if isinstance(layer, (nn.Conv2d, nn.Linear)):
+            if isinstance(layer, (nn.Linear)):
+                self.last_linear_layer = name
+                layer.register_forward_hook(self.save_activations_hook(name))
+
+    def save_activations_hook(self, layer_name):
+        def hook(module, input: Tuple[torch.Tensor], output):
+            self.activations["encoder_" + layer_name] = output
+        return hook
 
     def forward(self, obs_dict):
         B, C, H, W = obs_dict["screen_image"].shape
@@ -297,7 +322,7 @@ class ChaoticDwarvenGPT5(Encoder):
         if self.use_prev_action:
             prev_actions = obs_dict["prev_actions"].long().view(B)
             encodings.append(torch.nn.functional.one_hot(prev_actions, self.num_actions))
-
+        log.debug(f"[ChaoticDwarvenGPT5] forward mean: {torch.cat(encodings, dim=1).abs().mean()}")
         return torch.cat(encodings, dim=1)
 
     def get_out_size(self) -> int:
