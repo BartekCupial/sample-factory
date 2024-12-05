@@ -4,9 +4,7 @@ from typing import Dict, Optional
 
 import gymnasium as gym
 import torch
-from torch import Tensor, nn
-from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
-
+import torch.nn.functional as F
 from sample_factory.algo.utils.action_distributions import is_continuous_action_space, sample_actions_log_probs
 from sample_factory.algo.utils.running_mean_std import RunningMeanStdInPlace, running_mean_std_summaries
 from sample_factory.algo.utils.tensor_dict import TensorDict
@@ -18,6 +16,9 @@ from sample_factory.model.action_parameterization import (
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.normalize import ObservationNormalizer
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
+from torch import Tensor, nn
+from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 class ActorCritic(nn.Module, Configurable):
@@ -322,6 +323,199 @@ class ActorCriticSeparateWeights(ActorCritic):
         return result
 
 
+INSTRUCTION_PROMPT = """
+You are an agent playing MiniHack. The following are the possible high-level strategies you can take in the game, followed by a short description of each strategy:
+
+{skill_list}
+
+Each observation in the game is character-based. Here is a legend for what each character represents in the observation:
+    @: the player
+    #: a corridor
+    +: a closed door
+    |: a vertical wall
+    -: a horizontal wall
+    .: the floor
+    <: stairs leading up
+    >: stairs leading down
+
+Please output the strategy you would like to take when prompted with an observation in the following format:
+STRATEGY: <your_strategy> 
+Note that you can only pick from the strategies given above.
+"""
+
+import pdb
+import sys
+
+
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that works well with forking."""
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        sys.stdin = open("/dev/stdin")
+        pdb.Pdb.interaction(self, *args, **kwargs)
+        sys.stdin = _stdin
+
+
+class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
+    def __init__(
+        self,
+        model_factory,
+        obs_space: ObsSpace,
+        action_space: ActionSpace,
+        cfg: Config,
+    ):
+        super().__init__(model_factory, obs_space, action_space, cfg)
+
+        skill_list = ""
+        for _, s in enumerate(cfg.strategies, 1):
+            skill_list += f"- {s}\n"
+        self.system_prompt = INSTRUCTION_PROMPT.format(skill_list=skill_list)
+
+        self.critic_encoder = model_factory.make_model_encoder_func(cfg, obs_space)
+        self.critic_core = model_factory.make_model_core_func(cfg, self.critic_encoder.get_out_size())
+
+        self.encoders = [self.critic_encoder]
+        self.cores = [self.critic_core]
+
+        self.core_func = self._core_rnn if self.cfg.use_rnn else self._core_empty
+
+        self.critic_decoder = model_factory.make_model_decoder_func(cfg, self.critic_core.get_out_size())
+        self.decoders = [self.critic_decoder]
+
+        self.critic_linear = nn.Linear(self.critic_decoder.get_out_size(), 1)
+        self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
+
+        self.apply(self.initialize_weights)
+
+        # NOTE: needs to come *after* weight initialization so pre-trained weights aren't lost!
+        self.tokenizer = AutoTokenizer.from_pretrained(cfg.lm_model_name)
+        self.tokenizer.pad_token = (
+            self.tokenizer.eos_token
+        )  # TODO: I'm still not entirely sure if this is the right thing to do
+        self.actor = AutoModelForCausalLM.from_pretrained(
+            cfg.lm_model_name,
+            # attn_implementation="flash_attention_2", # NOTE: messes up generations for some reason - turn off for now
+            torch_dtype=torch.bfloat16,
+        )
+
+        self.pad_token_id = self.actor.config.eos_token_id[0]
+
+    def forward_tail(
+        self, core_output, values_only: bool, sample_actions: bool, action_mask: Optional[Tensor] = None
+    ) -> TensorDict:
+        core_outputs = core_output.chunk(len(self.cores), dim=1)
+
+        # second core output corresponds to the critic
+        critic_decoder_output = self.critic_decoder(core_outputs[0])
+        values = self.critic_linear(critic_decoder_output).squeeze()
+
+        result = TensorDict(values=values)
+        if values_only:
+            # this can be further optimized - we don't need to calculate actor head/core just to get values
+            return result
+
+        return result
+
+    def _create_messages_from_obs(self, obs):
+        messages = []
+
+        batched_tty_chars = obs["tty_chars"].cpu().numpy()
+        for tty_char in batched_tty_chars:
+            text_obs = ""
+            for line in tty_char:
+                text_obs += "".join([chr(c) for c in line]) + "\n"
+
+            messages.append(
+                [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": text_obs},
+                ]
+            )
+
+        return messages
+
+    def _preprocess_messages(self, messages):
+        tokenized_messages = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            continue_final_message=False,  # TODO: double check this
+            return_dict=True,
+            return_tensors="pt",
+            padding=True,
+            # **tokenizer_kwargs, # TODO: check if anything else needed here
+        )
+
+        # move to device
+        for key in tokenized_messages:
+            tokenized_messages[key] = tokenized_messages[key].to(model_device(self))
+
+        return tokenized_messages
+
+    def _actions_and_logits(self, tokenized_messages):
+        generated_sequence = self.actor.generate(
+            input_ids=tokenized_messages["input_ids"],
+            attention_mask=tokenized_messages["attention_mask"],
+            max_new_tokens=50,
+            output_scores=True,
+            return_dict_in_generate=True,
+            # **generate_kwargs # TODO: check if anything else needed here
+        )
+
+        logits = generated_sequence.scores
+        generated_tokens = generated_sequence.sequences[:, tokenized_messages["input_ids"].shape[1] :]
+
+        return generated_tokens, logits
+
+    def _log_probs_from_logits(self, logits, generated_tokens):
+        logits = torch.stack(logits)  # T x B x V
+        logits = logits.permute(1, 0, 2)  # Rearrange to B x T x V
+        log_softmaxed_logits = F.log_softmax(logits, dim=-1)  # Shape: B x T x V
+        gathered_log_probs = log_softmaxed_logits.gather(
+            dim=2, index=generated_tokens.unsqueeze(-1)
+        )  # Shape: B x T x 1
+        gathered_log_probs = gathered_log_probs.squeeze(-1)  # Shape: B x T
+
+        padding_mask = generated_tokens != self.pad_token_id  # Shape: B x T
+        masked_log_probs = gathered_log_probs.masked_fill(~padding_mask, 0.0)
+
+        total_log_prob = masked_log_probs.sum(dim=1)  # Shape: B
+
+        return total_log_prob
+
+    def forward(
+        self, normalized_obs_dict, rnn_states, values_only=False, action_mask: Optional[Tensor] = None
+    ) -> TensorDict:
+        x = self.forward_head(normalized_obs_dict)
+        x, new_rnn_states = self.forward_core(x, rnn_states)
+        result = self.forward_tail(x, values_only, sample_actions=True, action_mask=action_mask)
+
+        # (1) generate actions and (2) record log probabilities
+        if not values_only:
+            messages = self._create_messages_from_obs(normalized_obs_dict)
+            tokenized_messages = self._preprocess_messages(messages)
+            generated_tokens, logits = self._actions_and_logits(tokenized_messages)
+            log_probs = self._log_probs_from_logits(logits, generated_tokens)
+
+            # NOTE: decoding is only for debugging
+            # generated_tokens_list = generated_tokens.cpu().numpy().tolist()
+            # for sequence in generated_tokens_list:
+            #     text = self.tokenizer.decode(
+            #         sequence,
+            #         skip_special_tokens=True,
+            #         clean_up_tokenization_spaces=True,
+            #     )
+            #     print(text)
+
+            result["log_prob_actions"] = log_probs
+            result["actions"] = generated_tokens
+            # NOTE: action logits aren't used for LM model, so we just set them to zeros
+            result["action_logits"] = torch.zeros((log_probs.shape[0], 10), device=log_probs.device)
+
+        result["new_rnn_states"] = new_rnn_states
+        return result
+
+
 def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
     from sample_factory.algo.utils.context import global_model_factory
 
@@ -334,12 +528,27 @@ def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_spac
         return ActorCriticSeparateWeights(model_factory, obs_space, action_space, cfg)
 
 
+import pdb
+import sys
+
+
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that works well with forking."""
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        sys.stdin = open("/dev/stdin")
+        pdb.Pdb.interaction(self, *args, **kwargs)
+        sys.stdin = _stdin
+
+
 def create_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
     # check if user specified custom actor/critic creation function
     from sample_factory.algo.utils.context import global_model_factory
 
     make_actor_critic_func = global_model_factory().make_actor_critic_func
-    return make_actor_critic_func(cfg, obs_space, action_space)
+    return make_actor_critic_func(global_model_factory(), obs_space, action_space, cfg)
+    # return make_actor_critic_func(cfg, obs_space, action_space)
 
 
 def obs_space_without_action_mask(obs_space: ObsSpace) -> ObsSpace:
