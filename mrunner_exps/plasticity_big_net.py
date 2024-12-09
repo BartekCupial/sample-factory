@@ -21,9 +21,8 @@ config = {
     "with_wandb": True,
     "wandb_user": "ideas-ncbr",
     "wandb_project": "nethack_plasticity",
-    "wandb_group": "plasticity, big net",
+    "wandb_group": "plasticity, big net, more options",
     "heartbeat_reporting_interval": 1800,
-
 }
 
 # params different between exps
@@ -31,8 +30,10 @@ params_grid = [
     {
         "seed": list(range(1)),
         "delta": [0.99],
-        "decoder_mlp_layers": [[], [1024]],
-        "encoder_conv_mlp_layers": [[512,512], [512], [1024]]
+        "decoder_mlp_layers": [[2048, 2048], [4096]],
+        "encoder_conv_mlp_layers": [[2048,2048,2048], [4096,4096]],
+        "num_epochs": [1, 3, 10],
+        "encoder_conv_architecture": ["convnet_simple", "convnet_impala"],
     },
 ]
 
