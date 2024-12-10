@@ -226,6 +226,8 @@ def add_extra_params_general(parser):
         help="this parameter doesn't work with with lr_scheduler, it will be overwritten.",
     )
     p.add_argument("--remove_critic", type=str2bool, default=False)
+    p.add_argument("--tau", type=float, default=0.1)
+    p.add_argument("--delta", type=float, default=0.01)  # threshold for effective rank
 
 
 def main():  # pragma: no cover

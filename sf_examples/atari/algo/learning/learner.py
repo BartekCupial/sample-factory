@@ -353,6 +353,92 @@ class DatasetLearner(Learner):
             valids=valids,
         )
 
+    def _calculate_neuron_score_all_layers(self, activations):
+        all_layers_score = {}
+
+        for layer_name, activations_values in activations.items():
+            # batch_size = min(256, activations_values.shape[0])
+            # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
+            mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
+            neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
+            all_layers_score[layer_name] = neuron_scores
+        return all_layers_score
+
+    def _dead_neurons(self, tau):
+        if self.cfg.actor_critic_share_weights:
+            activations = {
+                            "encoder": self.actor_critic.encoder.activations, 
+                            "decoder": self.actor_critic.decoder.activations,
+                          }
+        else:
+            activations = {
+                            "actor_encoder": self.actor_critic.actor_encoder.activations,
+                            "actor_decoder": self.actor_critic.actor_decoder.activations,
+                            "critic_decoder": self.actor_critic.critic_encoder.activations,
+                            "critic_decoder": self.actor_critic.critic_decoder.activations,
+                          }
+
+        neurons_dict = {}  
+        dead_neurons_dict = {}
+        dead_neurons_pct_dict = {}
+
+        for module_name, activations_dict in activations.items():
+            all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+            for layer_name, layer_scores in all_layers_scores.items():
+                num_neurons = layer_scores.shape[0]
+                num_dead_neurons = (layer_scores <= tau).sum().item()
+
+                neurons_dict[module_name + '__' + layer_name] = num_neurons
+                dead_neurons_dict['n_dead__' + '__' + layer_name] = num_dead_neurons
+                dead_neurons_pct_dict['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
+                log.debug(f"{module_name}: {num_dead_neurons}/{num_neurons}")
+        return dead_neurons_dict, dead_neurons_pct_dict 
+
+    def grad_and_param_norms(self):
+        per_layer_grad_norms = {
+            name: p.grad.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+            if p.grad is not None
+        }
+
+        per_layer_param_norms = {
+            name: p.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+        }
+
+        return per_layer_grad_norms, per_layer_param_norms
+
+    def effective_rank(self, srank_threshold):
+            if self.actor_critic.decoder.last_linear_layer is not None:
+                last_layer = self.actor_critic.decoder.last_linear_layer
+                features = self.actor_critic.decoder.activations["decoder_" + last_layer] 
+            elif self.actor_critic.encoder.last_linear_layer is not None:
+                last_layer = self.actor_critic.encoder.last_linear_layer
+                features = self.actor_critic.encoder.activations["encoder_" + last_layer]
+            else:
+                raise ValueError("Both Encoder and Decoder lack linear layers!") 
+
+            U, S, V = torch.linalg.svd(features)
+
+            # Effective feature rank is the number of normalized singular values
+            # such that their cumulative sum is greater than some epsilon.
+            assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
+            s_sum = torch.sum(S)
+
+            # Catch case where the regularizer has collapsed the network features
+            # This makes the training not crash entirely when rank collapse occurs
+            if np.isclose(s_sum.item(), 0.0):
+                # Break tie through random selection of two singular values
+                indices = torch.randperm(len(S))[:2]
+                s_min, s_max = S[indices]
+                return torch.zeros(1), s_min, s_max
+            else:
+                S_normalized = S / s_sum
+                S_cum = torch.cumsum(S_normalized, dim=-1)
+                # Get the first index where the rank threshold is exceeded
+                k = (S_cum > srank_threshold).nonzero()[0]
+                return k, S.min(), S.max()
+
     def _calculate_losses(
         self,
         mb: AttrDict,
@@ -447,6 +533,11 @@ class DatasetLearner(Learner):
             kickstarting_loss=to_scalar(kickstarting_loss),
         )
 
+        dead_neurons_dict, dead_neurons_pct_dict = self._dead_neurons(self.cfg.tau) 
+        rank, _, _ = self.effective_rank(self.cfg.delta)
+        log.debug(f"Effective Rank: {rank}")
+        per_layer_grad_norms, per_layer_param_norms = self.grad_and_param_norms()
+
         return (
             action_distribution,
             policy_loss,
@@ -455,6 +546,11 @@ class DatasetLearner(Learner):
             kl_loss,
             value_loss,
             loss_summaries,
+            dead_neurons_dict, 
+            dead_neurons_pct_dict,
+            rank,
+            per_layer_grad_norms,
+            per_layer_param_norms,
             regularizer_loss,
             regularizer_loss_summaries,
         )
@@ -538,6 +634,11 @@ class DatasetLearner(Learner):
                         kl_loss,
                         value_loss,
                         loss_summaries,
+                        dead_neurons_dict, 
+                        dead_neurons_pct_dict,
+                        rank,
+                        per_layer_grad_norms,
+                        per_layer_param_norms,
                         regularizer_loss,
                         regularizer_loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
