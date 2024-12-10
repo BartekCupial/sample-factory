@@ -43,9 +43,7 @@ for atari_game in atari_games:
                 "seed": list(range(1)),
                 "learning_rate": [learning_rate],
                 "env": [f"atari_{atari_game}"],
-                "actor_critic_share_weights": [False],
-                "init_critic_from_actor": [False],
-                "critic_learning_rate": [learning_rate * 5],
+                "actor_critic_share_weights": [True],
                 "tau": [0.99],
             },
         ]
