@@ -916,11 +916,12 @@ class Learner(Configurable):
             stats[layer] = var['dead_neurons_pct_dict'][layer]
 
         # Log grad norms and param norms 
-        for layer in var['per_layer_grad_norms'].keys():
-            stats[layer] = var['per_layer_grad_norms'][layer]
+        if self.train_step % 100 == 0:
+            for layer in var['per_layer_grad_norms'].keys():
+                stats[layer] = var['per_layer_grad_norms'][layer]
 
-        for layer in var['per_layer_param_norms'].keys():
-            stats[layer] = var['per_layer_param_norms'][layer]
+            for layer in var['per_layer_param_norms'].keys():
+                stats[layer] = var['per_layer_param_norms'][layer]
 
         # Log effective rank
         stats.effective_rank = var.rank
