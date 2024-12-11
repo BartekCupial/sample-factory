@@ -31,8 +31,8 @@ params_grid = [
         "seed": list(range(1)),
         "delta": [0.99],
         "decoder_mlp_layers": [[2048, 2048], [4096]],
-        "encoder_conv_mlp_layers": [[2048,2048,2048], [4096,4096]],
-        "num_epochs": [1, 3, 10],
+        "encoder_conv_mlp_layers": [[2048,2048], [4096,4096]],
+        "num_epochs": [1, 5],
         "encoder_conv_architecture": ["convnet_simple", "convnet_impala"],
     },
 ]
