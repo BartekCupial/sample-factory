@@ -6,7 +6,7 @@ name = globals()["script"][:-3]
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
-    "train_for_env_steps": 100_000_000,
+    "train_for_env_steps": 2_000_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,
@@ -18,7 +18,7 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "test plasticity",
+    "wandb_group": "big exp plasticity v2",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -45,6 +45,8 @@ for atari_game in atari_games:
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [True],
                 "tau": [0.99],
+                "encoder_conv_mlp_layers": [[1024], [1024,1024]],
+                "decoder_mlp_layers": [[], [1024]],
             },
         ]
 

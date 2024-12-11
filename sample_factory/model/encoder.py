@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 import torch
 from gymnasium import spaces
 from torch import Tensor, nn
+from torch.jit import ScriptModule
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.model_utils import ModelModule, create_mlp, model_device, nonlinearity
@@ -55,13 +56,17 @@ class MultiInputEncoder(Encoder):
         self.activations = {}
         self.last_linear_layer = None
         self.register_hooks()
+        log.debug(f"FINAL encoder last layer: {self.last_linear_layer}")
 
     def register_hooks(self):
         for name, layer in self.named_modules():
             # if isinstance(layer, (nn.Conv2d, nn.Linear)):
-            if isinstance(layer, (nn.Linear)):
+            if isinstance(layer, nn.Linear) or (isinstance(layer, ScriptModule) and "Linear" in getattr(layer, 'original_name', '')):
                 self.last_linear_layer = name
+                log.debug(f"Replacing last layer: {self.last_linear_layer}")
                 layer.register_forward_hook(self.save_activations_hook(name))
+            else:
+                log.debug(f"Sorry, layer {name} (orig. {getattr(layer, 'original_name', '')}) is not linear!")
 
     def save_activations_hook(self, layer_name):
         def hook(module, input, output):
@@ -153,7 +158,8 @@ class ConvEncoder(Encoder):
         activation = nonlinearity(self.cfg)
         extra_mlp_layers: List[int] = cfg.encoder_conv_mlp_layers
         enc = ConvEncoderImpl(obs_space.shape, conv_filters, extra_mlp_layers, activation)
-        self.enc = torch.jit.script(enc)
+        # self.enc = torch.jit.script(enc)
+        self.enc = enc
 
         self.encoder_out_size = calc_num_elements(self.enc, obs_space.shape)
         log.debug(f"Conv encoder output size: {self.encoder_out_size}")
