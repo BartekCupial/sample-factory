@@ -154,6 +154,25 @@ class ActorCriticSharedWeights(ActorCritic):
         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
 
         self.apply(self.initialize_weights)
+        self.n_params = self.get_n_params()
+
+    def get_n_params(self):
+        self.n_params_encoders = 0
+        self.n_params_cores = 0
+        self.n_params_decoders = 0
+
+        for encoder in self.encoders:
+            self.n_params_encoders += sum(p.numel() for p in encoder.parameters())
+
+        for core in self.cores:
+            self.n_params_cores += sum(p.numel() for p in core.parameters())
+
+        for decoder in self.decoders:
+            self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
+        
+        n_params = sum(p.numel() for p in self.parameters())
+
+        return n_params
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
@@ -216,7 +235,21 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
 
         self.apply(self.initialize_weights)
+        self.n_params = self.get_n_params()
 
+    def get_n_params(self):
+        # n_params = 0
+        # for encoder in self.encoders:
+        #     n_params += sum(p.numel() for p in encoder.parameters())
+
+        # for core in self.cores:
+        #     n_params += sum(p.numel() for p in core.parameters())
+
+        # for decoder in self.decoders:
+        #     n_params += sum(p.numel() for p in decoder.parameters())
+        n_params = sum(p.numel() for p in self.parameters())
+        return n_params
+    
     def _core_rnn(self, head_output, rnn_states):
         """
         This is actually pretty slow due to all these split and cat operations.

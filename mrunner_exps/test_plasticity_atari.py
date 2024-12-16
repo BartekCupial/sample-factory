@@ -6,27 +6,26 @@ name = globals()["script"][:-3]
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
-    "train_for_env_steps": 2_000_000_000,
+    "train_for_env_steps": 500_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,
     "worker_num_splits": 2,
-    "rollout": 128,
+    "rollout": 256,
     "async_rl": True,
     "restart_behavior": "overwrite",
     "save_milestones_ith": 10_000_000,
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "big exp plasticity v2",
+    "wandb_group": "test plasticity log",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": True,
+    "with_wandb": False,
     "serial_mode": False,
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
-    "skip_train": 5_000_000,
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
 }
@@ -44,9 +43,7 @@ for atari_game in atari_games:
                 "learning_rate": [learning_rate],
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [True],
-                "tau": [0.99],
-                "encoder_conv_mlp_layers": [[1024], [1024,1024]],
-                "decoder_mlp_layers": [[], [1024]],
+                "delta": [0.99],
             },
         ]
 

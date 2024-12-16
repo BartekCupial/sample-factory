@@ -211,7 +211,7 @@ class Learner(Configurable):
 
         # trainable torch module
         self.actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
-        log.debug("Created Actor Critic model with architecture:")
+        log.debug(f"Created Actor Critic model with {self.actor_critic.n_params} parameters ({self.actor_critic.n_params_encoders} in Encoder, {self.actor_critic.n_params_cores} in Core, {self.actor_critic.n_params_decoders} in Decoder), and architecture:")
         log.debug(self.actor_critic)
         self.actor_critic.model_to_device(self.device)
 
@@ -886,23 +886,31 @@ class Learner(Configurable):
         stats.kl_loss = var.kl_loss
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
+        
+        stats.dead_neurons = var.dead_neurons
+        stats.effective_rank = var.effective_rank
 
-        # Log dead neurons
-        for layer in var['dead_neurons_dict'].keys():
-            stats[layer] = var['dead_neurons_dict'][layer]
+        if self.train_step % 200 == 0:
+            stats.per_layer_grad_norms = var.per_layer_grad_norms
+            stats.per_layer_param_norms = var.per_layer_param_norms
+        
+        # # Log dead neurons
+        # for layer in var['dead_neurons_dict'].keys():
+        #     stats[layer] = var['dead_neurons_dict'][layer]
 
-        for layer in var['dead_neurons_pct_dict'].keys():
-            stats[layer] = var['dead_neurons_pct_dict'][layer]
+        # for layer in var['dead_neurons_pct_dict'].keys():
+        #     stats[layer] = var['dead_neurons_pct_dict'][layer]
 
-        # Log grad norms and param norms 
-        for layer in var['per_layer_grad_norms'].keys():
-            stats[layer] = var['per_layer_grad_norms'][layer]
+        # # Log grad norms and param norms 
+        # if self.train_step % 200 == 0:
+        #     for layer in var['per_layer_grad_norms'].keys():
+        #         stats[layer] = var['per_layer_grad_norms'][layer]
 
-        for layer in var['per_layer_param_norms'].keys():
-            stats[layer] = var['per_layer_param_norms'][layer]
+        #     for layer in var['per_layer_param_norms'].keys():
+        #         stats[layer] = var['per_layer_param_norms'][layer]
 
         # Log effective rank
-        stats.effective_rank = var.rank
+        # stats.effective_rank = var.rank
 
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()

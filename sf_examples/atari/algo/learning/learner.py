@@ -359,9 +359,16 @@ class DatasetLearner(Learner):
         for layer_name, activations_values in activations.items():
             # batch_size = min(256, activations_values.shape[0])
             # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
-            mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
-            neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
-            all_layers_score[layer_name] = neuron_scores
+            if "conv" in layer_name:
+                mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (out_channels, height, width)
+                flattened_activations = mean_abs_activations.view(-1)  # Shape: (out_channels * height * width)
+                mean_activation = torch.mean(flattened_activations)  # Scalar
+                neuron_scores = flattened_activations / (mean_activation + 1e-9)  # Shape: (out_channels * height * width)
+                all_layers_score[layer_name] = neuron_scores  # Shape: (number of neurons)
+            else:
+                mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
+                neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
+                all_layers_score[layer_name] = neuron_scores
         return all_layers_score
 
     def _dead_neurons(self, tau):
@@ -379,9 +386,8 @@ class DatasetLearner(Learner):
                           }
 
         neurons_dict = {}  
-        dead_neurons_dict = {}
-        dead_neurons_pct_dict = {}
-
+        dead_neurons = {}
+        
         for module_name, activations_dict in activations.items():
             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
             for layer_name, layer_scores in all_layers_scores.items():
@@ -389,32 +395,32 @@ class DatasetLearner(Learner):
                 num_dead_neurons = (layer_scores <= tau).sum().item()
 
                 neurons_dict[module_name + '__' + layer_name] = num_neurons
-                dead_neurons_dict['n_dead__' + '__' + layer_name] = num_dead_neurons
-                dead_neurons_pct_dict['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
+                dead_neurons['n_dead__' + '__' + layer_name] = num_dead_neurons
+                dead_neurons['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
                 log.debug(f"{module_name}: {num_dead_neurons}/{num_neurons}")
-        return dead_neurons_dict, dead_neurons_pct_dict 
+        return dead_neurons
 
-    def grad_and_param_norms(self):
+    def _grad_and_param_norms(self):
         per_layer_grad_norms = {
-            name: p.grad.data.norm(2).item()
+            f"grad_norm__{name}": p.grad.data.norm(2).item()
             for name, p in self.actor_critic.named_parameters()
             if p.grad is not None
         }
 
         per_layer_param_norms = {
-            name: p.data.norm(2).item()
+            f"param_norm__{name}": p.data.norm(2).item()
             for name, p in self.actor_critic.named_parameters()
         }
 
         return per_layer_grad_norms, per_layer_param_norms
 
-    def effective_rank(self, srank_threshold):
+    def _effective_rank(self, srank_threshold):
             if self.actor_critic.decoder.last_linear_layer is not None:
                 last_layer = self.actor_critic.decoder.last_linear_layer
-                features = self.actor_critic.decoder.activations["decoder_" + last_layer] 
+                features = self.actor_critic.decoder.activations["decoder_" + last_layer]
             elif self.actor_critic.encoder.last_linear_layer is not None:
                 last_layer = self.actor_critic.encoder.last_linear_layer
-                features = self.actor_critic.encoder.activations["encoder_" + last_layer]
+                features = self.actor_critic.encoder.activations["encoder_mlp_" + last_layer]
             else:
                 raise ValueError("Both Encoder and Decoder lack linear layers!") 
 
@@ -533,10 +539,11 @@ class DatasetLearner(Learner):
             kickstarting_loss=to_scalar(kickstarting_loss),
         )
 
-        dead_neurons_dict, dead_neurons_pct_dict = self._dead_neurons(self.cfg.tau) 
-        rank, _, _ = self.effective_rank(self.cfg.delta)
+        dead_neurons = self._dead_neurons(self.cfg.tau) 
+        rank, _, _ = self._effective_rank(self.cfg.delta)
         log.debug(f"Effective Rank: {rank}")
-        per_layer_grad_norms, per_layer_param_norms = self.grad_and_param_norms()
+        per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
+        effective_rank = {"effective_rank": rank}
 
         return (
             action_distribution,
@@ -546,9 +553,8 @@ class DatasetLearner(Learner):
             kl_loss,
             value_loss,
             loss_summaries,
-            dead_neurons_dict, 
-            dead_neurons_pct_dict,
-            rank,
+            dead_neurons,
+            effective_rank,
             per_layer_grad_norms,
             per_layer_param_norms,
             regularizer_loss,
@@ -634,9 +640,8 @@ class DatasetLearner(Learner):
                         kl_loss,
                         value_loss,
                         loss_summaries,
-                        dead_neurons_dict, 
-                        dead_neurons_pct_dict,
-                        rank,
+                        dead_neurons,
+                        effective_rank,
                         per_layer_grad_norms,
                         per_layer_param_norms,
                         regularizer_loss,
