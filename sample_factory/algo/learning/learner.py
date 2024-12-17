@@ -31,6 +31,17 @@ from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
 
+import pdb
+import sys
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that works well with forking."""
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        sys.stdin = open("/dev/stdin")
+        pdb.Pdb.interaction(self, *args, **kwargs)
+        sys.stdin = _stdin
+
 
 class LearningRateScheduler:
     def update(self, current_lr, recent_kls):
@@ -467,8 +478,13 @@ class Learner(Configurable):
 
         return kl_old, kl_loss
 
-    def _entropy_exploration_loss(self, action_distribution, valids, num_invalids: int) -> Tensor:
-        entropy = action_distribution.entropy()
+    def _entropy_exploration_loss(self, action_distribution, log_prob_actions, valids, num_invalids: int) -> Tensor:
+        if self.cfg.use_lm:
+            # entropy needs to use sampling estimate
+            entropy = -log_prob_actions
+        else:
+            entropy = action_distribution.entropy()
+
         entropy = masked_select(entropy, valids, num_invalids)
         entropy_loss = -self.cfg.exploration_loss_coeff * entropy.mean()
         return entropy_loss
@@ -583,8 +599,15 @@ class Learner(Configurable):
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
-            action_distribution = self.actor_critic.action_distribution()
-            log_prob_actions = action_distribution.log_prob(mb.actions)
+
+            if self.cfg.use_lm:
+                # TODO: compute log prob of mb.actions under current model
+                action_distribution = mb.action_logits
+                log_prob_actions = self.actor_critic.log_prob(mb.normalized_obs, mb.actions)
+            else:
+                action_distribution = self.actor_critic.action_distribution()
+                log_prob_actions = action_distribution.log_prob(mb.actions)
+
             ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
 
             # super large/small values can cause numerical problems and are probably noise anyway
@@ -645,13 +668,22 @@ class Learner(Configurable):
 
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
+            ForkedPdb().set_trace()
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
-            exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
+            exploration_loss = self.exploration_loss_func(action_distribution, log_prob_actions, valids, num_invalids)
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+
+            # sampled kl with respect to the base model
+            if self.cfg.use_lm:
+                with torch.no_grad():
+                    base_model_log_prob_actions = self.actor_critic.log_prob(mb.normalized_obs, mb.actions, base_model=True)
+                base_model_kl_loss = (log_prob_actions - base_model_log_prob_actions).mean()
+            else:
+                base_model_kl_loss = torch.tensor(0.0).to(self.device)
 
         loss_summaries = dict(
             ratio=ratio,
@@ -663,7 +695,7 @@ class Learner(Configurable):
             adv_mean=adv_mean,
         )
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, base_model_kl_loss, loss_summaries, log_prob_actions
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -727,12 +759,14 @@ class Learner(Configurable):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        base_model_kl_loss,
                         loss_summaries,
+                        log_prob_actions,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
-                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
+                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss + base_model_kl_loss
                     critic_loss = value_loss
                     loss: Tensor = actor_loss + critic_loss
 
@@ -741,12 +775,13 @@ class Learner(Configurable):
                     high_loss = 30.0
                     if torch.abs(loss) > high_loss:
                         log.warning(
-                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
+                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f base_kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
                             to_scalar(loss),
                             to_scalar(policy_loss),
                             to_scalar(value_loss),
                             to_scalar(exploration_loss),
                             to_scalar(kl_loss),
+                            to_scalar(base_model_kl_loss),
                         )
 
                         # perhaps something weird is happening, we definitely want summaries from this step
@@ -756,11 +791,15 @@ class Learner(Configurable):
                     # if kl_old is not None it is already calculated above
                     if kl_old is None:
                         # calculate KL-divergence with the behaviour policy action distribution
-                        old_action_distribution = get_action_distribution(
-                            self.actor_critic.action_space,
-                            mb.action_logits,
-                        )
-                        kl_old = action_distribution.kl_divergence(old_action_distribution)
+                        if self.cfg.use_lm:
+                            kl_old = log_prob_actions - mb.log_prob_actions
+                        else:
+                            old_action_distribution = get_action_distribution(
+                                self.actor_critic.action_space,
+                                mb.action_logits,
+                            )
+                            kl_old = action_distribution.kl_divergence(old_action_distribution)
+
                         kl_old = masked_select(kl_old, mb.valids, num_invalids)
 
                     kl_old_mean = float(kl_old.mean().item())

@@ -144,6 +144,7 @@ class Batcher(HeartbeatStoppableEventLoopObject):
         for i in range(self.max_batches_to_accumulate):
             rnn_size = get_rnn_size(self.cfg)
             training_batch = alloc_trajectory_tensors(
+                self.cfg,
                 self.env_info,
                 self.traj_per_training_iteration,
                 self.cfg.rollout,
