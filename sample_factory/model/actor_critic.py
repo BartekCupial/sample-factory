@@ -19,6 +19,7 @@ from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from torch import Tensor, nn
 from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation import GenerationConfig
 
 
 class ActorCritic(nn.Module, Configurable):
@@ -393,10 +394,26 @@ class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
         self.tokenizer.pad_token = (
             self.tokenizer.eos_token
         )  # TODO: I'm still not entirely sure if this is the right thing to do
+
         self.actor = AutoModelForCausalLM.from_pretrained(
             cfg.lm_model_name,
             # attn_implementation="flash_attention_2", # NOTE: messes up generations for some reason - turn off for now
             torch_dtype=torch.bfloat16,
+        )
+
+        # This one is kept frozen
+        self.base_actor = AutoModelForCausalLM.from_pretrained(
+            cfg.lm_model_name,
+            # attn_implementation="flash_attention_2", # NOTE: messes up generations for some reason - turn off for now
+            torch_dtype=torch.bfloat16,
+        )
+
+        self.generation_config = GenerationConfig(
+            bos_token_id=128000,
+            do_sample=True,
+            eos_token_id=[128001, 128008, 128009],
+            temperature=0.7,
+            top_p=0.9,
         )
 
         self.pad_token_id = self.actor.config.eos_token_id[0]
@@ -417,46 +434,11 @@ class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
 
         return result
 
-    def _create_messages_from_obs(self, obs):
-        messages = []
-
-        batched_tty_chars = obs["tty_chars"].cpu().numpy()
-        for tty_char in batched_tty_chars:
-            text_obs = ""
-            for line in tty_char:
-                text_obs += "".join([chr(c) for c in line]) + "\n"
-
-            messages.append(
-                [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": text_obs},
-                ]
-            )
-
-        return messages
-
-    def _preprocess_messages(self, messages):
-        tokenized_messages = self.tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            continue_final_message=False,  # TODO: double check this
-            return_dict=True,
-            return_tensors="pt",
-            padding=True,
-            # **tokenizer_kwargs, # TODO: check if anything else needed here
-        )
-
-        # move to device
-        for key in tokenized_messages:
-            tokenized_messages[key] = tokenized_messages[key].to(model_device(self))
-
-        return tokenized_messages
-
     def _actions_and_logits(self, tokenized_messages):
         generated_sequence = self.actor.generate(
             input_ids=tokenized_messages["input_ids"],
             attention_mask=tokenized_messages["attention_mask"],
-            max_new_tokens=50,
+            max_new_tokens=self.cfg.lm_max_act_tokens,
             output_scores=True,
             return_dict_in_generate=True,
             # **generate_kwargs # TODO: check if anything else needed here
@@ -483,6 +465,21 @@ class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
 
         return total_log_prob
 
+    def _pad_generated_tokens(self, generated_tokens):
+        # pad to max so that all actions have the same number of tokens
+        cur_length = generated_tokens.shape[1]
+        max_length = self.cfg.lm_max_act_tokens
+        if cur_length < max_length:
+            padding = torch.full(
+                (generated_tokens.shape[0], max_length - cur_length),
+                self.pad_token_id,
+                dtype=generated_tokens.dtype,
+                device=generated_tokens.device,
+            )
+            generated_tokens = torch.cat([generated_tokens, padding], dim=1)
+
+        return generated_tokens
+
     def forward(
         self, normalized_obs_dict, rnn_states, values_only=False, action_mask: Optional[Tensor] = None
     ) -> TensorDict:
@@ -492,10 +489,13 @@ class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
 
         # (1) generate actions and (2) record log probabilities
         if not values_only:
-            messages = self._create_messages_from_obs(normalized_obs_dict)
-            tokenized_messages = self._preprocess_messages(messages)
+            tokenized_messages = {
+                "input_ids": normalized_obs_dict["tokenized_tty_chars_input_ids"].long(),
+                "attention_mask": normalized_obs_dict["tokenized_tty_chars_attn_mask"].long(),
+            }
             generated_tokens, logits = self._actions_and_logits(tokenized_messages)
             log_probs = self._log_probs_from_logits(logits, generated_tokens)
+            generated_tokens = self._pad_generated_tokens(generated_tokens)
 
             # NOTE: decoding is only for debugging
             # generated_tokens_list = generated_tokens.cpu().numpy().tolist()
@@ -510,11 +510,56 @@ class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
             result["log_prob_actions"] = log_probs
             result["actions"] = generated_tokens
             # NOTE: action logits aren't used for LM model, so we just set them to zeros
-            result["action_logits"] = torch.zeros((log_probs.shape[0], 10), device=log_probs.device)
+            result["action_logits"] = torch.zeros((log_probs.shape[0], self.action_space.n), device=log_probs.device)
 
         result["new_rnn_states"] = new_rnn_states
         return result
 
+    def log_prob(self, obs, actions, base_model: bool = False):
+        model = self.actor if not base_model else self.base_actor
+
+        input_ids = torch.cat([obs["tokenized_tty_chars_input_ids"], actions], dim=1).long()
+        attn_mask = torch.cat([obs['tokenized_tty_chars_attn_mask'], torch.ones_like(actions)], dim=1).long()
+
+        # forward pass
+        position_ids = attn_mask.long().cumsum(-1) - 1
+        position_ids.masked_fill_(attn_mask == 0, 1)
+        x = {
+            "input_ids": input_ids,
+            "attention_mask": attn_mask,
+            "position_ids": position_ids,
+        }
+        outputs = model(**x)
+
+        # TODO: potentially move this to __init__
+        model._prepare_special_tokens(self.generation_config, True, input_ids.device)
+
+        logits_processor = model._get_logits_processor(
+            generation_config=self.generation_config,
+            input_ids_seq_length=input_ids.shape[1],
+            encoder_input_ids=input_ids,
+            prefix_allowed_tokens_fn=None,
+            logits_processor=[],
+            device=input_ids.device,
+            model_kwargs=None,
+            negative_prompt_ids=None,
+            negative_prompt_attention_mask=None,
+        )
+
+        # Take only the newly generated tokens
+        logits = outputs.logits[:, obs["tokenized_tty_chars_input_ids"].shape[1] - 1 : -1].float() 
+
+        for t in range(logits.shape[1]):
+            logits[:, t, :] = logits_processor(input_ids, logits[:, t, :])
+
+        log_softmaxed_logits = F.log_softmax(logits, dim=-1)  # Shape: B x T x V
+        gathered_log_probs = log_softmaxed_logits.gather(dim=2, index=actions.long().unsqueeze(-1))  # Shape: B x T x 1
+        gathered_log_probs = gathered_log_probs.squeeze(-1)  # Shape: B x T
+
+        padding_mask = actions.long() != self.pad_token_id
+        masked_log_probs = gathered_log_probs.masked_fill(~padding_mask, 0.0)
+
+        return masked_log_probs.sum(dim=1) # Shape: B
 
 def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
     from sample_factory.algo.utils.context import global_model_factory
