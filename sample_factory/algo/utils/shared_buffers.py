@@ -22,6 +22,16 @@ from sample_factory.utils.gpu_utils import gpus_for_process
 from sample_factory.utils.typing import Device, MpQueue, PolicyID
 from sample_factory.utils.utils import log
 
+import pdb
+import sys
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that works well with forking."""
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        sys.stdin = open("/dev/stdin")
+        pdb.Pdb.interaction(self, *args, **kwargs)
+        sys.stdin = _stdin
 
 def policy_device(cfg: AttrDict, policy_id: PolicyID) -> torch.device:
     """Inference/Learning device for the given policy."""
@@ -76,7 +86,7 @@ def policy_output_shapes(num_actions, num_action_distribution_parameters) -> Lis
     return policy_outputs
 
 
-def alloc_trajectory_tensors(env_info: EnvInfo, num_traj, rollout, rnn_size, device, share) -> TensorDict:
+def alloc_trajectory_tensors(cfg, env_info: EnvInfo, num_traj, rollout, rnn_size, device, share) -> TensorDict:
     obs_space = env_info.obs_space
 
     tensors = TensorDict()
@@ -92,6 +102,9 @@ def alloc_trajectory_tensors(env_info: EnvInfo, num_traj, rollout, rnn_size, dev
     tensors["rnn_states"] = init_tensor([num_traj, rollout + 1], torch.float32, [rnn_size], device, share)
 
     num_actions, num_action_distribution_parameters = action_info(env_info)
+    if cfg.use_lm:
+        num_actions = cfg.lm_max_act_tokens
+
     policy_outputs = policy_output_shapes(num_actions, num_action_distribution_parameters)
 
     # we need one more step to hold values for the last step
@@ -128,6 +141,10 @@ def alloc_policy_output_tensors(cfg, env_info: EnvInfo, rnn_size, device, share)
         policy_outputs_shape += [envs_per_split, num_agents]
 
     num_actions, num_action_distribution_parameters = action_info(env_info)
+
+    if cfg.use_lm:
+        num_actions = cfg.lm_max_act_tokens
+
     policy_outputs = policy_output_shapes(num_actions, num_action_distribution_parameters)
     policy_outputs += [("new_rnn_states", [rnn_size])]  # different name so we don't override current step rnn_state
 
@@ -148,6 +165,17 @@ def alloc_policy_output_tensors(cfg, env_info: EnvInfo, rnn_size, device, share)
 
     return policy_output_tensors, output_names, output_sizes
 
+
+import pdb
+import sys
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that works well with forking."""
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        sys.stdin = open("/dev/stdin")
+        pdb.Pdb.interaction(self, *args, **kwargs)
+        sys.stdin = _stdin
 
 class BufferMgr(Configurable):
     def __init__(self, cfg, env_info: EnvInfo):
@@ -213,6 +241,7 @@ class BufferMgr(Configurable):
             self.traj_buffer_queues[device] = get_queue(cfg.serial_mode)
 
             self.traj_tensors_torch[device] = alloc_trajectory_tensors(
+                cfg,
                 env_info,
                 num_buffers,
                 cfg.rollout,
