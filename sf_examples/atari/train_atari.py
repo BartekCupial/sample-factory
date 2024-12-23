@@ -228,6 +228,7 @@ def add_extra_params_general(parser):
     p.add_argument("--remove_critic", type=str2bool, default=False)
     p.add_argument("--tau", type=float, default=0.1)
     p.add_argument("--delta", type=float, default=0.01)  # threshold for effective rank
+    p.add_argument("--repeat_action_probability", type=float, default=0.0) # for sticky actions
 
 
 def main():  # pragma: no cover

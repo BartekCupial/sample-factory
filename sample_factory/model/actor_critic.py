@@ -238,18 +238,23 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.n_params = self.get_n_params()
 
     def get_n_params(self):
-        # n_params = 0
-        # for encoder in self.encoders:
-        #     n_params += sum(p.numel() for p in encoder.parameters())
+        self.n_params_encoders = 0
+        self.n_params_cores = 0
+        self.n_params_decoders = 0
 
-        # for core in self.cores:
-        #     n_params += sum(p.numel() for p in core.parameters())
+        for encoder in self.encoders:
+            self.n_params_encoders += sum(p.numel() for p in encoder.parameters())
 
-        # for decoder in self.decoders:
-        #     n_params += sum(p.numel() for p in decoder.parameters())
+        for core in self.cores:
+            self.n_params_cores += sum(p.numel() for p in core.parameters())
+
+        for decoder in self.decoders:
+            self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
+        
         n_params = sum(p.numel() for p in self.parameters())
+
         return n_params
-    
+
     def _core_rnn(self, head_output, rnn_states):
         """
         This is actually pretty slow due to all these split and cat operations.

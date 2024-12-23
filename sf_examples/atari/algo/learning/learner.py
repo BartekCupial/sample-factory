@@ -397,7 +397,7 @@ class DatasetLearner(Learner):
                 neurons_dict[module_name + '__' + layer_name] = num_neurons
                 dead_neurons['n_dead__' + '__' + layer_name] = num_dead_neurons
                 dead_neurons['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
-                log.debug(f"{module_name}: {num_dead_neurons}/{num_neurons}")
+                log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
         return dead_neurons
 
     def _grad_and_param_norms(self):
@@ -414,13 +414,28 @@ class DatasetLearner(Learner):
 
         return per_layer_grad_norms, per_layer_param_norms
 
-    def _effective_rank(self, srank_threshold):
-            if self.actor_critic.decoder.last_linear_layer is not None:
-                last_layer = self.actor_critic.decoder.last_linear_layer
-                features = self.actor_critic.decoder.activations["decoder_" + last_layer]
-            elif self.actor_critic.encoder.last_linear_layer is not None:
-                last_layer = self.actor_critic.encoder.last_linear_layer
-                features = self.actor_critic.encoder.activations["encoder_mlp_" + last_layer]
+    # as for now, works only for ActorCriticSharedWeights
+    def _effective_rank(self, srank_threshold, compute_for="actor"):
+            
+            if self.cfg.actor_critic_share_weights:
+                decoder = self.actor_critic.decoder
+                encoder = self.actor_critic.encoder
+            else:
+                if compute_for == "actor":
+                    decoder = self.actor_critic.actor_decoder
+                    encoder = self.actor_critic.actor_encoder
+                elif compute_for == "critic":
+                    decoder = self.actor_critic.critic_decoder
+                    encoder = self.actor_critic.critic_encoder
+                else:
+                    raise ValueError("The value of compute_for must be either 'actor' or 'critic") 
+
+            if decoder.last_linear_layer is not None:
+                last_layer = decoder.last_linear_layer
+                features = decoder.activations["decoder_" + last_layer]
+            elif encoder.last_linear_layer is not None:
+                last_layer = encoder.last_linear_layer
+                features = encoder.activations["encoder_mlp_" + last_layer]
             else:
                 raise ValueError("Both Encoder and Decoder lack linear layers!") 
 
@@ -539,11 +554,19 @@ class DatasetLearner(Learner):
             kickstarting_loss=to_scalar(kickstarting_loss),
         )
 
-        dead_neurons = self._dead_neurons(self.cfg.tau) 
-        rank, _, _ = self._effective_rank(self.cfg.delta)
-        log.debug(f"Effective Rank: {rank}")
+        dead_neurons = self._dead_neurons(self.cfg.tau)
+
+        if self.cfg.actor_critic_share_weights: 
+            rank, _, _ = self._effective_rank(self.cfg.delta)
+            #log.debug(f"Effective Rank: {rank}")
+            effective_rank = {"effective_rank": rank}
+        else:
+            actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
+            critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
+            effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
+            
         per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
-        effective_rank = {"effective_rank": rank}
+
 
         return (
             action_distribution,

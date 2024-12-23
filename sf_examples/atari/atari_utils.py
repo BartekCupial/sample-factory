@@ -9,6 +9,7 @@ from sample_factory.envs.env_wrappers import (
     MaxAndSkipEnv,
     NoopResetEnv,
     NumpyObsWrapper,
+    StickyActionEnv,
 )
 
 ATARI_W = ATARI_H = 84
@@ -98,6 +99,9 @@ def make_atari_env(env_name, cfg, env_config, render_mode: Optional[str] = None)
     if atari_spec.default_timeout is not None:
         env._max_episode_steps = atari_spec.default_timeout
 
+    if cfg.repeat_action_probability > 0:
+        env = StickyActionEnv(env, action_repeat_probability=cfg.repeat_action_probability)
+    
     # these are chosen to match Stable-Baselines3 and CleanRL implementations as precisely as possible
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = NoopResetEnv(env, noop_max=30)
