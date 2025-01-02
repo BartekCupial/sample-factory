@@ -395,8 +395,8 @@ class DatasetLearner(Learner):
                 num_dead_neurons = (layer_scores <= tau).sum().item()
 
                 neurons_dict[module_name + '__' + layer_name] = num_neurons
-                dead_neurons['n_dead__' + '__' + layer_name] = num_dead_neurons
-                dead_neurons['pct_dead__' + '__' + layer_name] = num_dead_neurons/num_neurons*100
+                dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+                dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
                 log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
         return dead_neurons
 
