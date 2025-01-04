@@ -22,17 +22,6 @@ from sample_factory.utils.gpu_utils import gpus_for_process
 from sample_factory.utils.typing import Device, MpQueue, PolicyID
 from sample_factory.utils.utils import log
 
-import pdb
-import sys
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that works well with forking."""
-
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        sys.stdin = open("/dev/stdin")
-        pdb.Pdb.interaction(self, *args, **kwargs)
-        sys.stdin = _stdin
-
 def policy_device(cfg: AttrDict, policy_id: PolicyID) -> torch.device:
     """Inference/Learning device for the given policy."""
 
@@ -165,17 +154,6 @@ def alloc_policy_output_tensors(cfg, env_info: EnvInfo, rnn_size, device, share)
 
     return policy_output_tensors, output_names, output_sizes
 
-
-import pdb
-import sys
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that works well with forking."""
-
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        sys.stdin = open("/dev/stdin")
-        pdb.Pdb.interaction(self, *args, **kwargs)
-        sys.stdin = _stdin
 
 class BufferMgr(Configurable):
     def __init__(self, cfg, env_info: EnvInfo):

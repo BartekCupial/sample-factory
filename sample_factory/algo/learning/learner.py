@@ -31,17 +31,6 @@ from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
 
-import pdb
-import sys
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that works well with forking."""
-
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        sys.stdin = open("/dev/stdin")
-        pdb.Pdb.interaction(self, *args, **kwargs)
-        sys.stdin = _stdin
-
 
 class LearningRateScheduler:
     def update(self, current_lr, recent_kls):
@@ -668,7 +657,6 @@ class Learner(Configurable):
 
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
-            ForkedPdb().set_trace()
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
             exploration_loss = self.exploration_loss_func(action_distribution, log_prob_actions, valids, num_invalids)
             kl_old, kl_loss = self.kl_loss_func(

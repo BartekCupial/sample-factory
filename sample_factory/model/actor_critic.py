@@ -344,19 +344,6 @@ STRATEGY: <your_strategy>
 Note that you can only pick from the strategies given above.
 """
 
-import pdb
-import sys
-
-
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that works well with forking."""
-
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        sys.stdin = open("/dev/stdin")
-        pdb.Pdb.interaction(self, *args, **kwargs)
-        sys.stdin = _stdin
-
 
 class LMActorCriticSeparateWeights(ActorCriticSeparateWeights):
     def __init__(
@@ -571,20 +558,6 @@ def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_spac
         return ActorCriticSharedWeights(model_factory, obs_space, action_space, cfg)
     else:
         return ActorCriticSeparateWeights(model_factory, obs_space, action_space, cfg)
-
-
-import pdb
-import sys
-
-
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that works well with forking."""
-
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        sys.stdin = open("/dev/stdin")
-        pdb.Pdb.interaction(self, *args, **kwargs)
-        sys.stdin = _stdin
 
 
 def create_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
