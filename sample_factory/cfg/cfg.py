@@ -304,7 +304,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument(
         "--lr_schedule",
         default="constant",
-        choices=["constant", "kl_adaptive_minibatch", "kl_adaptive_epoch"],
+        choices=["linear_decay", "constant", "kl_adaptive_minibatch", "kl_adaptive_epoch"],
         type=str,
         help=(
             "Learning rate schedule to use. Constant keeps constant learning rate throughout training."
