@@ -1,27 +1,24 @@
 import time
+import json
+from pathlib import Path
 from collections import deque
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
+import pandas as pd
 import gymnasium as gym
 import numpy as np
 import torch
 from torch import Tensor
 
-from sample_factory.algo.learning.learner import Learner
-from sample_factory.algo.sampling.batched_sampling import preprocess_actions
-from sample_factory.algo.utils.action_distributions import argmax_actions
 from sample_factory.algo.utils.env_info import extract_env_info
 from sample_factory.algo.utils.make_env import make_env_func_batched
-from sample_factory.algo.utils.misc import ExperimentStatus
-from sample_factory.algo.utils.rl_utils import make_dones, prepare_and_normalize_obs
-from sample_factory.algo.utils.tensor_utils import unsqueeze_tensor
+from sample_factory.algo.utils.rl_utils import make_dones
 from sample_factory.cfg.arguments import load_from_checkpoint
-from sample_factory.huggingface.huggingface_utils import generate_model_card, generate_replay_video, push_to_hf
-from sample_factory.model.actor_critic import create_actor_critic
-from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import Config, StatusCode
 from sample_factory.utils.utils import debug_log_every_n, experiment_dir, log
+from sample_factory.utils.dicts import iterate_recursively
+from sample_factory.algo.sampling.sampling_utils import record_episode_statistics_wrapper_stats
 
 
 def visualize_policy_inputs(normalized_obs: Dict[str, Tensor]) -> None:
@@ -82,9 +79,91 @@ def render_frame(cfg, env, video_frames, num_episodes, last_render_start) -> flo
     return render_start
 
 
-def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
-    verbose = False
+def _print_eval_summaries(cfg, eval_stats):
+    for policy_id in range(cfg.num_policies):
+        results = {}
+        for key, stat in eval_stats.items():
+            stat_value = np.mean(stat[policy_id])
 
+            if "/" in key:
+                # custom summaries have their own sections in tensorboard
+                avg_tag = key
+                min_tag = f"{key}_min"
+                max_tag = f"{key}_max"
+            elif key in ("reward", "len"):
+                # reward and length get special treatment
+                avg_tag = f"{key}/{key}"
+                min_tag = f"{key}/{key}_min"
+                max_tag = f"{key}/{key}_max"
+            else:
+                avg_tag = f"policy_stats/avg_{key}"
+                min_tag = f"policy_stats/avg_{key}_min"
+                max_tag = f"policy_stats/avg_{key}_max"
+
+            results[avg_tag] = float(stat_value)
+
+            # for key stats report min/max as well
+            if key in ("reward", "true_objective", "len"):
+                results[min_tag] = float(min(stat[policy_id]))
+                results[max_tag] = float(max(stat[policy_id]))
+
+        log.info(json.dumps(results, indent=4))
+
+
+def _save_eval_results(cfg, eval_stats):
+    for policy_id in range(cfg.num_policies):
+        data = {}
+        for key, stat in eval_stats.items():
+            data[key] = stat[policy_id]
+
+        csv_output_dir = Path(experiment_dir(cfg=cfg))
+        if cfg.csv_folder_name is not None:
+            csv_output_dir = csv_output_dir / cfg.csv_folder_name
+        csv_output_dir.mkdir(exist_ok=True, parents=True)
+        csv_output_path = csv_output_dir / f"eval_p{policy_id}.csv"
+
+        data = pd.DataFrame(data)
+        data.to_csv(csv_output_path)
+
+
+def _log_to_wandb(cfg, eval_stats):
+    import wandb
+    from sample_factory.utils.wandb_utils import init_wandb
+
+    init_wandb(cfg)
+
+    for policy_id in range(cfg.num_policies):
+        results = {}
+        for key, stat in eval_stats.items():
+            stat_value = np.mean(stat[policy_id])
+
+            if "/" in key:
+                # custom summaries have their own sections in tensorboard
+                avg_tag = key
+                min_tag = f"{key}_min"
+                max_tag = f"{key}_max"
+            elif key in ("reward", "len"):
+                # reward and length get special treatment
+                avg_tag = f"{key}/{key}"
+                min_tag = f"{key}/{key}_min"
+                max_tag = f"{key}/{key}_max"
+            else:
+                avg_tag = f"policy_stats/avg_{key}"
+                min_tag = f"policy_stats/avg_{key}_min"
+                max_tag = f"policy_stats/avg_{key}_max"
+
+            results[avg_tag] = float(stat_value)
+
+            # for key stats report min/max as well
+            if key in ("reward", "true_objective", "len"):
+                results[min_tag] = float(min(stat[policy_id]))
+                results[max_tag] = float(max(stat[policy_id]))
+        
+        # Log to wandb
+        wandb.log(results, step=policy_id)
+
+
+def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     cfg = load_from_checkpoint(cfg)
 
     eval_env_frameskip: int = cfg.env_frameskip if cfg.eval_env_frameskip is None else cfg.eval_env_frameskip
@@ -97,6 +176,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
 
     cfg.num_envs = 1
 
+    cfg.no_render = True
     render_mode = "human"
     if cfg.save_video:
         render_mode = "rgb_array"
@@ -121,15 +201,31 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     def max_frames_reached(frames):
         return cfg.max_num_frames is not None and frames > cfg.max_num_frames
 
-    reward_list = []
-
     obs, infos = env.reset()
     episode_reward = None
     finished_episode = [False for _ in range(env.num_agents)]
 
     video_frames = []
     num_episodes = 0
+    last_episode_duration = 0
 
+    def handle_episode_stats(stats, policy_id=0):
+        # heavily based on the `_episodic_stats_handler` from `Runner`
+        episode_number = stats.get("episode_number", 0)
+        log.debug(
+            f"Episode {episode_number} / {cfg.max_num_episodes} ended after {stats['len']:.1f} steps. Return: {stats['reward']:.1f}. True objective {stats['true_objective']:.1f}"
+        )
+
+        for _, key, value in iterate_recursively(stats):
+            if key not in policy_avg_stats:
+                policy_avg_stats[key] = [[] for _ in range(cfg.num_policies)]
+
+            if isinstance(value, np.ndarray) and value.ndim > 0:
+                policy_avg_stats[key][policy_id].extend(value)
+            else:
+                policy_avg_stats[key][policy_id].append(value)
+
+    policy_avg_stats: Dict[str, List[List]] = dict()
     with torch.no_grad():
         while not max_frames_reached(num_frames):
             for _ in range(render_action_repeat):
@@ -143,6 +239,12 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
                     episode_reward = rew.float().clone()
                 else:
                     episode_reward += rew.float()
+
+                if "env_steps" in infos[0]["episode_extra_stats"]:
+                    last_episode_duration += infos[0]["episode_extra_stats"]["env_steps"]
+                else:
+                    # multiply by frameskip to get the episode lenghts matching the actual number of simulated steps
+                    last_episode_duration += env_info.frameskip if cfg.summaries_use_frameskip else 1
 
                 num_frames += 1
                 if num_frames % 100 == 0:
@@ -160,85 +262,31 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
                             true_objective = infos[agent_i].get("true_objective", rew)
                         true_objectives[agent_i].append(true_objective)
 
-                        if verbose:
-                            log.info(
-                                "Episode finished for agent %d at %d frames. Reward: %.3f, true_objective: %.3f",
-                                agent_i,
-                                num_frames,
-                                episode_reward[agent_i],
-                                true_objectives[agent_i][-1],
-                            )
+                        stats = dict(
+                            reward=rew,
+                            true_objective=true_objective,
+                            len=last_episode_duration,
+                            episode_number=num_episodes,
+                            episode_extra_stats=infos[agent_i].get("episode_extra_stats", dict()),
+                        )
+
+                        episode_wrapper_stats = record_episode_statistics_wrapper_stats(infos[agent_i])
+                        if episode_wrapper_stats is not None:
+                            wrapper_rew, wrapper_len = episode_wrapper_stats
+                            stats["RecordEpisodeStatistics_reward"] = wrapper_rew
+                            stats["RecordEpisodeStatistics_len"] = wrapper_len
+
+                        handle_episode_stats(stats, policy_id=agent_i)
+
+                        last_episode_duration = 0
                         episode_reward[agent_i] = 0
-
-                        if cfg.use_record_episode_statistics:
-                            # we want the scores from the full episode not a single agent death (due to EpisodicLifeEnv wrapper)
-                            if "episode" in infos[agent_i].keys():
-                                num_episodes += 1
-                                reward_list.append(infos[agent_i]["episode"]["r"])
-                        else:
-                            num_episodes += 1
-                            reward_list.append(true_objective)
-
-                # if episode terminated synchronously for all agents, pause a bit before starting a new one
-                if all(dones):
-                    render_frame(cfg, env, video_frames, num_episodes, last_render_start)
-                    time.sleep(0.05)
-
-                if all(finished_episode):
-                    finished_episode = [False] * env.num_agents
-                    avg_episode_rewards_str, avg_true_objective_str = "", ""
-                    for agent_i in range(env.num_agents):
-                        avg_rew = np.mean(episode_rewards[agent_i])
-                        avg_true_obj = np.mean(true_objectives[agent_i])
-
-                        if not np.isnan(avg_rew):
-                            if avg_episode_rewards_str:
-                                avg_episode_rewards_str += ", "
-                            avg_episode_rewards_str += f"#{agent_i}: {avg_rew:.3f}"
-                        if not np.isnan(avg_true_obj):
-                            if avg_true_objective_str:
-                                avg_true_objective_str += ", "
-                            avg_true_objective_str += f"#{agent_i}: {avg_true_obj:.3f}"
-
-                    log.info(
-                        "Avg episode rewards: %s, true rewards: %s", avg_episode_rewards_str, avg_true_objective_str
-                    )
-                    log.info(
-                        "Avg episode reward: %.3f, avg true_objective: %.3f",
-                        np.mean([np.mean(episode_rewards[i]) for i in range(env.num_agents)]),
-                        np.mean([np.mean(true_objectives[i]) for i in range(env.num_agents)]),
-                    )
-
-                # VizDoom multiplayer stuff
-                # for player in [1, 2, 3, 4, 5, 6, 7, 8]:
-                #     key = f'PLAYER{player}_FRAGCOUNT'
-                #     if key in infos[0]:
-                #         log.debug('Score for player %d: %r', player, infos[0][key])
+                        num_episodes += 1
 
             if num_episodes >= cfg.max_num_episodes:
                 break
 
     env.close()
 
-    if cfg.save_video:
-        if cfg.fps > 0:
-            fps = cfg.fps
-        else:
-            fps = 30
-        generate_replay_video(experiment_dir(cfg=cfg), video_frames, fps, cfg)
-
-    if cfg.push_to_hub:
-        generate_model_card(
-            experiment_dir(cfg=cfg),
-            cfg.algo,
-            cfg.env,
-            cfg.hf_repository,
-            reward_list,
-            cfg.enjoy_script,
-            cfg.train_script,
-        )
-        push_to_hf(experiment_dir(cfg=cfg), cfg.hf_repository)
-
-    return ExperimentStatus.SUCCESS, sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / sum(
-        [len(episode_rewards[i]) for i in range(env.num_agents)]
-    )
+    _print_eval_summaries(cfg, policy_avg_stats)
+    _save_eval_results(cfg, policy_avg_stats)
+    _log_to_wandb(cfg, policy_avg_stats)
