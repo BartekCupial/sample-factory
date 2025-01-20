@@ -38,6 +38,14 @@ class ActorCritic(nn.Module, Configurable):
             # comment this out for debugging (i.e. to be able to step through normalizer code)
             self.returns_normalizer = torch.jit.script(self.returns_normalizer)
 
+        if self.cfg.rnd:
+            self.int_returns_normalizer: Optional[RunningMeanStdInPlace] = None
+            if cfg.normalize_returns:
+                returns_shape = (1,)  # it's actually a single scalar but we use 1D shape for the normalizer
+                self.int_returns_normalizer = RunningMeanStdInPlace(returns_shape)
+                # comment this out for debugging (i.e. to be able to step through normalizer code)
+                self.int_returns_normalizer = torch.jit.script(self.int_returns_normalizer)
+
         self.last_action_distribution = None  # to be populated after each forward step
 
     def get_action_parameterization(self, decoder_output_size: int):
@@ -153,6 +161,7 @@ class ActorCriticSharedWeights(ActorCritic):
         decoder_out_size: int = self.decoder.get_out_size()
 
         self.critic_linear = nn.Linear(decoder_out_size, 1)
+        self.int_critic_linear = nn.Linear(decoder_out_size, 1)
         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
 
         self.apply(self.initialize_weights)
@@ -173,6 +182,9 @@ class ActorCriticSharedWeights(ActorCritic):
 
         result = TensorDict(values=values)
         if values_only:
+            if self.cfg.rnd:
+                int_values = self.int_critic_linear(decoder_output).squeeze()
+                result["int_values"] = int_values
             return result
 
         action_distribution_params, self.last_action_distribution = self.action_parameterization(

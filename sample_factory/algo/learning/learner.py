@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
+from torch.nn import functional as F
 
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution, is_continuous_action_space
@@ -172,6 +173,8 @@ class Learner(Configurable):
 
         self.exploration_loss_func: Optional[Callable] = None
         self.kl_loss_func: Optional[Callable] = None
+        self.rnd_forward_loss_func: Optional[Callable] = None
+        self.rnd_int_value_loss_func: Optional[Callable] = None
 
         self.is_initialized = False
 
@@ -224,6 +227,21 @@ class Learner(Configurable):
         self.actor_critic.train()
 
         params = list(self.actor_critic.parameters())
+
+        if self.cfg.rnd:
+            from nle_code_wrapper.agents.sample_factory.minihack.models.rnd_model import RNDModel
+
+            self.rnd_model = RNDModel(self.cfg, self.env_info.obs_space)
+            log.debug("Created RND model with architecture:")
+            log.debug(self.rnd_model)
+            self.rnd_model.model_to_device(self.device)
+            params = params + list(self.rnd_model.predictor.parameters())
+
+            self.rnd_forward_loss_func = self._rnd_forward_loss
+            self.rnd_int_value_loss_func = self._rnd_int_value_loss
+        else:
+            self.rnd_forward_loss_func = lambda next_state, valids, num_invalids: 0.0
+            self.rnd_int_value_loss_func = lambda values, target, valids, num_invalids: 0.0
 
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
@@ -482,6 +500,41 @@ class Learner(Configurable):
         kl_prior_loss = self.cfg.exploration_loss_coeff * kl_prior
         return kl_prior_loss
 
+    def _rnd_int_value_loss(
+        self,
+        values: Tensor,
+        target: Tensor,
+        valids: Tensor,
+        num_invalids: int,
+    ) -> Tensor:
+        value_loss = (values - target).pow(2)
+        value_loss = masked_select(value_loss, valids, num_invalids)
+        value_loss = value_loss.mean()
+
+        value_loss *= self.cfg.value_loss_coeff
+
+        return value_loss
+
+    def _rnd_forward_loss(
+        self, 
+        next_state,
+        valids: Tensor,
+        num_invalids: int,
+    ) -> Tensor:
+        predict_next_state_feature, target_next_state_feature = self.rnd_model(next_state)
+        forward_loss = F.mse_loss(
+            predict_next_state_feature, target_next_state_feature.detach(), reduction="none"
+        ).mean(-1)
+        forward_loss = masked_select(forward_loss, valids, num_invalids)
+
+        mask = torch.rand(len(forward_loss), device=self.device)
+        mask = (mask < self.cfg.rnd_update_proportion).type(torch.FloatTensor).to(self.device)
+        forward_loss = (forward_loss * mask).sum() / torch.max(
+            mask.sum(), torch.tensor([1], device=self.device, dtype=torch.float32)
+        )
+
+        return forward_loss
+
     def _optimizer_lr(self):
         for param_group in self.optimizer.param_groups:
             return param_group["lr"]
@@ -652,6 +705,8 @@ class Learner(Configurable):
             )
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+            rnd_int_value_loss = self.rnd_int_value_loss_func(mb.int_values, mb.int_returns, valids, num_invalids)
+            rnd_forward_loss = self.rnd_forward_loss_func(mb.normalized_obs, valids, num_invalids)
 
         loss_summaries = dict(
             ratio=ratio,
@@ -663,7 +718,17 @@ class Learner(Configurable):
             adv_mean=adv_mean,
         )
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return (
+            action_distribution, 
+            policy_loss, 
+            exploration_loss, 
+            kl_old, 
+            kl_loss, 
+            value_loss, 
+            rnd_int_value_loss, 
+            rnd_forward_loss, 
+            loss_summaries,
+        )
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -727,14 +792,16 @@ class Learner(Configurable):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        rnd_int_value_loss,
+                        rnd_forward_loss,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
-                    critic_loss = value_loss
-                    loss: Tensor = actor_loss + critic_loss
+                    critic_loss = value_loss + rnd_int_value_loss
+                    loss: Tensor = actor_loss + critic_loss + rnd_forward_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -863,6 +930,8 @@ class Learner(Configurable):
         stats.kl_loss = var.kl_loss
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
+        stats.rnd_forward_loss = var.rnd_forward_loss
+        stats.rnd_int_value_loss = var.rnd_int_value_loss
 
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()
@@ -936,6 +1005,46 @@ class Learner(Configurable):
             normalized_obs[key] = x.view(og_shape[key])
 
         return normalized_obs
+
+    def _calculate_curiosity_rewards(self, obs: TensorDict) -> TensorDict:
+        og_shape = dict()
+
+        # assuming obs is a flat dict, collapse time and envs dimensions into a single batch dimension
+        for key, x in obs.items():
+            og_shape[key] = x.shape
+            obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
+
+        predict_feature, target_feature = self.rnd_model(obs)
+        curiosity_rewards = ((target_feature - predict_feature).pow(2).sum(1) / 2).data
+
+        # restore original shape
+        for key, x in obs.items():
+            obs[key] = x.view(og_shape[key])
+
+        curiosity_rewards = curiosity_rewards.view((obs[key].shape[0], obs[key].shape[1],))
+        curiosity_rewards = curiosity_rewards[:, :-1]
+
+        return curiosity_rewards
+    
+    def _calculate_int_values(self, obs: TensorDict, rnn_states: Tensor) -> TensorDict:
+        og_shape = dict()
+
+        # assuming obs is a flat dict, collapse time and envs dimensions into a single batch dimension
+        for key, x in obs.items():
+            og_shape[key] = x.shape
+            obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
+
+        x = rnn_states
+        rnn_states = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
+
+        int_values = self.actor_critic(obs, rnn_states, values_only=True)["int_values"]
+        int_values = int_values.view((x.shape[0], x.shape[1],))
+
+        # restore original shape
+        for key, x in obs.items():
+            obs[key] = x.view(og_shape[key])
+
+        return int_values
 
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
@@ -1011,6 +1120,52 @@ class Learner(Configurable):
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
 
+            if self.cfg.rnd:
+                buff["curiosity_rewards"] = self._calculate_curiosity_rewards(buff["normalized_obs"])
+                buff["int_values"] = self._calculate_int_values(buff["normalized_obs"], buff["rnn_states"])
+
+                if self.cfg.normalize_returns:
+                    # Since our value targets are normalized, the values will also have normalized statistics.
+                    # We need to denormalize them before using them for GAE caculation and value bootstrapping.
+                    # rl_games PPO uses a similar approach, see:
+                    # https://github.com/Denys88/rl_games/blob/7b5f9500ee65ae0832a7d8613b019c333ecd932c/rl_games/algos_torch/models.py#L51
+                    int_denormalized_values = buff["int_values"].clone()  # need to clone since normalizer is in-place
+                    self.actor_critic.int_returns_normalizer(int_denormalized_values, denormalize=True)
+                else:
+                    # values are not normalized in this case, so we can use them as is
+                    int_denormalized_values = buff["int_values"]
+
+                if not self.cfg.with_vtrace:
+                    # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
+                    if self.cfg.hierarchical_gamma:
+                        assert "env_steps" in buff["normalized_obs"], "Hierarchical gamma requires strategy steps"
+                        buff["int_advantages"] = gae_advantages_conditioned(
+                            buff["curiosity_rewards"],
+                            torch.zeros_like(buff["dones"]),
+                            int_denormalized_values,
+                            buff["valids"],
+                            self.cfg.rnd_int_gamma,
+                            self.cfg.gae_lambda,
+                            buff["normalized_obs"]["env_steps"].squeeze(),
+                        )
+                    else:
+                        buff["int_advantages"] = gae_advantages(
+                            buff["curiosity_rewards"],
+                            torch.zeros_like(buff["dones"]),
+                            int_denormalized_values,
+                            buff["valids"],
+                            self.cfg.rnd_int_gamma,
+                            self.cfg.gae_lambda,
+                        )
+                    # here returns are not normalized yet, so we should use denormalized values
+                    buff["int_returns"] = buff["int_advantages"] + buff["valids"][:, :-1] * int_denormalized_values[:, :-1]
+
+                    # combine advantages
+                    buff["advantages"] = buff["advantages"] + self.cfg.rnd_int_coef * buff["int_advantages"]
+
+                    # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
+                    buff["int_values"] = buff["int_values"][:, :-1]
+
             # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
             for key in ["normalized_obs", "rnn_states", "values", "valids"]:
                 buff[key] = buff[key][:, :-1]
@@ -1026,6 +1181,11 @@ class Learner(Configurable):
             # return normalization parameters are only used on the learner, no need to lock the mutex
             if self.cfg.normalize_returns:
                 self.actor_critic.returns_normalizer(buff["returns"])  # in-place
+
+            if self.cfg.rnd:
+                # return normalization parameters are only used on the learner, no need to lock the mutex
+                if self.cfg.normalize_returns:
+                    self.actor_critic.int_returns_normalizer(buff["int_returns"])  # in-place
 
             num_invalids = dataset_size - buff["valids"].sum().item()
             if num_invalids > 0:
