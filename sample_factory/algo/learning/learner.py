@@ -241,7 +241,7 @@ class Learner(Configurable):
             self.rnd_int_value_loss_func = self._rnd_int_value_loss
         else:
             self.rnd_forward_loss_func = lambda next_state, valids, num_invalids: 0.0
-            self.rnd_int_value_loss_func = lambda values, target, valids, num_invalids: 0.0
+            self.rnd_int_value_loss_func = lambda mb, valids, num_invalids: 0.0
 
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
@@ -502,11 +502,12 @@ class Learner(Configurable):
 
     def _rnd_int_value_loss(
         self,
-        values: Tensor,
-        target: Tensor,
+        mb,
         valids: Tensor,
         num_invalids: int,
     ) -> Tensor:
+        values, target = mb.int_values, mb.int_returns,
+        
         value_loss = (values - target).pow(2)
         value_loss = masked_select(value_loss, valids, num_invalids)
         value_loss = value_loss.mean()
@@ -705,7 +706,7 @@ class Learner(Configurable):
             )
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
-            rnd_int_value_loss = self.rnd_int_value_loss_func(mb.int_values, mb.int_returns, valids, num_invalids)
+            rnd_int_value_loss = self.rnd_int_value_loss_func(mb, valids, num_invalids)
             rnd_forward_loss = self.rnd_forward_loss_func(mb.normalized_obs, valids, num_invalids)
 
         loss_summaries = dict(
