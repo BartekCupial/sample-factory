@@ -933,9 +933,10 @@ class Learner(Configurable):
         stats.kl_loss = var.kl_loss
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
-        stats.rnd_forward_loss = var.rnd_forward_loss
-        stats.rnd_int_value_loss = var.rnd_int_value_loss
-        stats.curiosity_rewards = torch.mean(var.mb.curiosity_rewards).item()
+        if self.cfg.rnd:
+            stats.rnd_forward_loss = var.rnd_forward_loss
+            stats.rnd_int_value_loss = var.rnd_int_value_loss
+            stats.curiosity_rewards = torch.mean(var.mb.curiosity_rewards).item()
 
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()
