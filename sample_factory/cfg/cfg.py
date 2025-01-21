@@ -501,6 +501,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument("--rnd_int_coef", default=0.1, type=float, help="coefficient of intrinsic reward")
     p.add_argument("--rnd_int_gamma", default=0.99, type=float, help="Intrinsic reward discount rate")
     p.add_argument("--rnd_forward_coef", default=0.01, type=float, help="weight on modelling loss (ie convergence of predictor)")
+    p.add_argument("--rnd_int_episodic", default=False, type=str2bool, help="Intrinsic returns episodic / non-episodic")
 
     # num_iterations_obs_norm_init: int = 5
     # """number of iterations to initialize the observations normalization parameters"""

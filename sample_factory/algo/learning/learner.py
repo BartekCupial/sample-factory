@@ -1145,7 +1145,7 @@ class Learner(Configurable):
                         assert "env_steps" in buff["normalized_obs"], "Hierarchical gamma requires strategy steps"
                         buff["int_advantages"] = gae_advantages_conditioned(
                             buff["curiosity_rewards"],
-                            torch.zeros_like(buff["dones"]),
+                            buff["dones"] if self.cfg.rnd_int_episodic else torch.zeros_like(buff["dones"]),
                             int_denormalized_values,
                             buff["valids"],
                             self.cfg.rnd_int_gamma,
@@ -1155,7 +1155,7 @@ class Learner(Configurable):
                     else:
                         buff["int_advantages"] = gae_advantages(
                             buff["curiosity_rewards"],
-                            torch.zeros_like(buff["dones"]),
+                            buff["dones"] if self.cfg.rnd_int_episodic else torch.zeros_like(buff["dones"]),
                             int_denormalized_values,
                             buff["valids"],
                             self.cfg.rnd_int_gamma,
