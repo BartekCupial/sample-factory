@@ -534,6 +534,8 @@ class Learner(Configurable):
             mask.sum(), torch.tensor([1], device=self.device, dtype=torch.float32)
         )
 
+        forward_loss *= self.cfg.rnd_forward_coef
+
         return forward_loss
 
     def _optimizer_lr(self):
@@ -933,6 +935,7 @@ class Learner(Configurable):
         stats.exploration_loss = var.exploration_loss
         stats.rnd_forward_loss = var.rnd_forward_loss
         stats.rnd_int_value_loss = var.rnd_int_value_loss
+        stats.curiosity_rewards = torch.mean(var.mb.curiosity_rewards).item()
 
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()

@@ -497,9 +497,10 @@ def add_rl_args(p: ArgumentParser):
 
     # RND arguments
     p.add_argument("--rnd", default=False, type=str2bool, help="use RND")
-    p.add_argument("--rnd_update_proportion", default=0.25, type=float, help="proportion of exp used for predictor update")
+    p.add_argument("--rnd_update_proportion", default=1.0, type=float, help="proportion of exp used for predictor update")
     p.add_argument("--rnd_int_coef", default=0.1, type=float, help="coefficient of intrinsic reward")
     p.add_argument("--rnd_int_gamma", default=0.99, type=float, help="Intrinsic reward discount rate")
+    p.add_argument("--rnd_forward_coef", default=0.01, type=float, help="weight on modelling loss (ie convergence of predictor)")
 
     # num_iterations_obs_norm_init: int = 5
     # """number of iterations to initialize the observations normalization parameters"""
