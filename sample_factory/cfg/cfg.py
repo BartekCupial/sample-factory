@@ -724,6 +724,12 @@ def add_wandb_args(p: ArgumentParser):
     """Weights and Biases experiment monitoring."""
     p.add_argument("--with_wandb", default=False, type=str2bool, help="Enables Weights and Biases integration")
     p.add_argument(
+        "--exp_tag",
+        default=None,
+        type=str,
+        help="",
+    )
+    p.add_argument(
         "--wandb_user",
         default=None,
         type=str,
