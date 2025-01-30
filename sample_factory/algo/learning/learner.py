@@ -522,17 +522,19 @@ class Learner(Configurable):
         valids: Tensor,
         num_invalids: int,
     ) -> Tensor:
-        predict_next_state_feature, target_next_state_feature = self.rnd_model(next_state)
+        normalized_obs = self.rnd_model.obs_normalizer(next_state)
+        predict_next_state_feature, target_next_state_feature = self.rnd_model(normalized_obs)
         forward_loss = F.mse_loss(
             predict_next_state_feature, target_next_state_feature.detach(), reduction="none"
         ).mean(-1)
         forward_loss = masked_select(forward_loss, valids, num_invalids)
+        forward_loss = forward_loss.mean()
 
-        mask = torch.rand(len(forward_loss), device=self.device)
-        mask = (mask < self.cfg.rnd_update_proportion).type(torch.FloatTensor).to(self.device)
-        forward_loss = (forward_loss * mask).sum() / torch.max(
-            mask.sum(), torch.tensor([1], device=self.device, dtype=torch.float32)
-        )
+        # mask = torch.rand(len(forward_loss), device=self.device)
+        # mask = (mask < self.cfg.rnd_update_proportion).type(torch.FloatTensor).to(self.device)
+        # forward_loss = (forward_loss * mask).sum() / torch.max(
+        #     mask.sum(), torch.tensor([1], device=self.device, dtype=torch.float32)
+        # )
 
         forward_loss *= self.cfg.rnd_forward_coef
 
@@ -934,6 +936,7 @@ class Learner(Configurable):
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
         if self.cfg.rnd:
+            stats.int_value = var.mb.int_values.mean()
             stats.rnd_forward_loss = var.rnd_forward_loss
             stats.rnd_int_value_loss = var.rnd_int_value_loss
             stats.curiosity_rewards = torch.mean(var.mb.curiosity_rewards).item()
@@ -1019,7 +1022,8 @@ class Learner(Configurable):
             og_shape[key] = x.shape
             obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
 
-        predict_feature, target_feature = self.rnd_model(obs)
+        normalized_obs = self.rnd_model.obs_normalizer(obs)
+        predict_feature, target_feature = self.rnd_model(normalized_obs)
         curiosity_rewards = ((target_feature - predict_feature).pow(2).sum(1) / 2).data
 
         # restore original shape
@@ -1029,7 +1033,7 @@ class Learner(Configurable):
         curiosity_rewards = curiosity_rewards.view((obs[key].shape[0], obs[key].shape[1],))
         curiosity_rewards = curiosity_rewards[:, :-1]
 
-        return curiosity_rewards
+        return self.cfg.rnd_int_coef * curiosity_rewards 
     
     def _calculate_int_values(self, obs: TensorDict, rnn_states: Tensor) -> TensorDict:
         og_shape = dict()
@@ -1166,7 +1170,7 @@ class Learner(Configurable):
                     buff["int_returns"] = buff["int_advantages"] + buff["valids"][:, :-1] * int_denormalized_values[:, :-1]
 
                     # combine advantages
-                    buff["advantages"] = buff["advantages"] + self.cfg.rnd_int_coef * buff["int_advantages"]
+                    buff["advantages"] = buff["advantages"] + buff["int_advantages"]
 
                     # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
                     buff["int_values"] = buff["int_values"][:, :-1]
