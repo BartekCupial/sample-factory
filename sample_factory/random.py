@@ -238,7 +238,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
                 else:
                     episode_reward += rew.float()
 
-                if "env_steps" in infos[0]["episode_extra_stats"]:
+                if "env_steps" in infos[0].get("episode_extra_stats", dict()):
                     last_episode_duration += infos[0]["episode_extra_stats"]["env_steps"]
                 else:
                     # multiply by frameskip to get the episode lenghts matching the actual number of simulated steps
