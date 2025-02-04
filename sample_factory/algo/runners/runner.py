@@ -288,7 +288,11 @@ class Runner(EventLoopObject, Configurable):
         """We write the train summaries to disk right away instead of accumulating them."""
         train_stats = msg[TRAIN_STATS]
         for key, scalar in train_stats.items():
-            runner.writers[policy_id].add_scalar(f"train/{key}", scalar, runner.env_steps[policy_id])
+            if key in ['dead_neurons', 'effective_rank', 'per_layer_grad_norms', 'per_layer_param_norms']:
+                for sub_key, sub_scalar in scalar.items():
+                    runner.writers[policy_id].add_scalar(f"{key}/{sub_key}", sub_scalar, runner.env_steps[policy_id])
+            else:
+                runner.writers[policy_id].add_scalar(f"train/{key}", scalar, runner.env_steps[policy_id])
 
         for key in ["version_diff_min", "version_diff_max", "version_diff_avg"]:
             if key in train_stats:

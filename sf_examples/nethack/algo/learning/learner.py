@@ -377,6 +377,112 @@ class DatasetLearner(Learner):
             valids=valids,
         )
 
+    def _calculate_neuron_score_all_layers(self, activations):
+        all_layers_score = {}
+
+        for layer_name, activations_values in activations.items():
+            # batch_size = min(256, activations_values.shape[0])
+            # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
+            if "conv" in layer_name:
+                mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (out_channels, height, width)
+                flattened_activations = mean_abs_activations.view(-1)  # Shape: (out_channels * height * width)
+                mean_activation = torch.mean(flattened_activations)  # Scalar
+                neuron_scores = flattened_activations / (mean_activation + 1e-9)  # Shape: (out_channels * height * width)
+                all_layers_score[layer_name] = neuron_scores  # Shape: (number of neurons)
+            else:
+                mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)
+                neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
+                all_layers_score[layer_name] = neuron_scores
+        return all_layers_score
+    
+    def _dead_neurons(self, tau):
+        if self.cfg.actor_critic_share_weights:
+            activations = {
+                            "encoder": self.actor_critic.encoder.activations, 
+                            "decoder": self.actor_critic.decoder.activations,
+                          }
+        else:
+            activations = {
+                            "actor_encoder": self.actor_critic.actor_encoder.activations,
+                            "actor_decoder": self.actor_critic.actor_decoder.activations,
+                            "critic_decoder": self.actor_critic.critic_encoder.activations,
+                            "critic_decoder": self.actor_critic.critic_decoder.activations,
+                          }
+
+        neurons_dict = {}  
+        dead_neurons = {}
+        
+        for module_name, activations_dict in activations.items():
+            all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+            for layer_name, layer_scores in all_layers_scores.items():
+                num_neurons = layer_scores.shape[0]
+                num_dead_neurons = (layer_scores <= tau).sum().item()
+
+                neurons_dict[module_name + '__' + layer_name] = num_neurons
+                dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+                dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+                log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
+        return dead_neurons
+    
+    def _grad_and_param_norms(self):
+        per_layer_grad_norms = {
+            name: p.grad.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+            if p.grad is not None
+        }
+
+        per_layer_param_norms = {
+            name: p.data.norm(2).item()
+            for name, p in self.actor_critic.named_parameters()
+        }
+
+        return per_layer_grad_norms, per_layer_param_norms
+
+    def _effective_rank(self, srank_threshold, compute_for='actor'):
+            if self.cfg.actor_critic_share_weights:
+                decoder = self.actor_critic.decoder
+                encoder = self.actor_critic.encoder
+            else:
+                if compute_for == "actor":
+                    decoder = self.actor_critic.actor_decoder
+                    encoder = self.actor_critic.actor_encoder
+                elif compute_for == "critic":
+                    decoder = self.actor_critic.critic_decoder
+                    encoder = self.actor_critic.critic_encoder
+                else:
+                    raise ValueError("The value of compute_for must be either 'actor' or 'critic") 
+
+            if decoder.last_linear_layer is not None:
+                last_layer = decoder.last_linear_layer
+                features = decoder.activations["decoder_" + last_layer]
+            elif encoder.last_linear_layer is not None:
+                last_layer = encoder.last_linear_layer
+                features = encoder.activations["encoder_mlp_" + last_layer]
+            else:
+                raise ValueError("Both Encoder and Decoder lack linear layers!") 
+
+            U, S, V = torch.linalg.svd(features)
+
+            # Effective feature rank is the number of normalized singular values
+            # such that their cumulative sum is greater than some epsilon.
+            assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
+            s_sum = torch.sum(S)
+
+            # Catch case where the regularizer has collapsed the network features
+            # This makes the training not crash entirely when rank collapse occurs
+            if np.isclose(s_sum.item(), 0.0):
+                # Break tie through random selection of two singular values
+                indices = torch.randperm(len(S))[:2]
+                s_min, s_max = S[indices]
+                return torch.zeros(1), s_min, s_max
+            else:
+                S_normalized = S / s_sum
+                S_cum = torch.cumsum(S_normalized, dim=-1)
+                # Get the first index where the rank threshold is exceeded
+                k = (S_cum > srank_threshold).nonzero()[0]
+                return k, S.min(), S.max()
+
+
     def _calculate_losses(
         self,
         mb: AttrDict,
@@ -479,6 +585,18 @@ class DatasetLearner(Learner):
             accuracy=to_scalar(accuracy),
         )
 
+        dead_neurons = self._dead_neurons(self.cfg.tau) 
+        if self.cfg.actor_critic_share_weights: 
+            rank, _, _ = self._effective_rank(self.cfg.delta)
+            #log.debug(f"Effective Rank: {rank}")
+            effective_rank = {"effective_rank": rank}
+        else:
+            actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
+            critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
+            effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
+
+        per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
+
         return (
             action_distribution,
             policy_loss,
@@ -487,6 +605,10 @@ class DatasetLearner(Learner):
             kl_loss,
             value_loss,
             loss_summaries,
+            dead_neurons,
+            effective_rank,
+            per_layer_grad_norms,
+            per_layer_param_norms,
             regularizer_loss,
             regularizer_loss_summaries,
         )
@@ -570,6 +692,10 @@ class DatasetLearner(Learner):
                         kl_loss,
                         value_loss,
                         loss_summaries,
+                        dead_neurons,
+                        effective_rank,
+                        per_layer_grad_norms,
+                        per_layer_param_norms,
                         regularizer_loss,
                         regularizer_loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
