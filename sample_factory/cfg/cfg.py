@@ -291,7 +291,6 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument("--dr_threshold", default=1.0, type=float, help="Dormant Ratio threshold for Shrink&Perturb")  # Default: don't use
     p.add_argument("--shrink", default=0.4, type=float, help="Shrinking coefficient for Shrink&Perturb")  # Default: as in the paper
     p.add_argument("--perturb", default=0.1, type=float, help="Perturbation coefficient for Shrink&Perturb")  # Default: as in the paper
-    
 
     # optimization
     p.add_argument(

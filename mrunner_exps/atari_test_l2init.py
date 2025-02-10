@@ -63,6 +63,7 @@ for atari_game in atari_games:
             "delta": [0.99],
             "dr_threshold": [1.0],
             "l2_init_loss_coeff": [0.01],
+            "count_montezuma_rooms": [True],
         },
     ]
 

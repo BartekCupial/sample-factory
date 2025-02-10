@@ -228,6 +228,8 @@ def add_extra_params_general(parser):
     p.add_argument("--remove_critic", type=str2bool, default=False)
     p.add_argument("--repeat_action_probability", type=float, default=0.0) # for sticky actions
 
+    # Montezuma 
+    p.add_argument("--count_montezuma_rooms", default=False, type=bool, help="Whether the number of rooms visited during Montezuma training should be tracked and logged")
 
 def main():  # pragma: no cover
     """Script entry point."""
