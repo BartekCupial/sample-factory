@@ -918,6 +918,7 @@ class Learner(Configurable):
         stats.env_steps = self.env_steps
         stats.lr = self.curr_lr
         stats.actual_lr = train_loop_vars.actual_lr  # potentially scaled because of masked data
+        stats.train_steps = self.train_step
 
         stats.update(self.actor_critic.summaries())
 
