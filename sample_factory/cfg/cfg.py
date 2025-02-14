@@ -134,6 +134,18 @@ def add_rl_args(p: ArgumentParser):
         "Example: if batch_size=128 and num_batches_per_epoch=2, then learner will process 2*128=256 environment transitions in one training iteration.",
     )
     p.add_argument(
+        "--gradient_accumulation_steps",
+        default=1,
+        type=int,
+        help="Perform optimizer step only after accumulating gradients for the specified number of steps",
+    )
+    p.add_argument(
+        "--target_batch_size",
+        default=1,
+        type=int,
+        help="Placeholder for number of batches",
+    )
+    p.add_argument(
         "--num_epochs",
         default=1,
         type=int,
