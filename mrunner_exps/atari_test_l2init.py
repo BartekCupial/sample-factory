@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 1_000_000,
+    "train_for_env_steps": 150_000_000,
     "num_workers": 4,
     "num_envs_per_worker": 8,
     "num_batches_per_epoch": 16,
@@ -15,7 +15,7 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari",
-    "wandb_group": "plasticity, test l2init + shrink and perturb",
+    "wandb_group": "plasticity, test l2init",
     "wandb_tags": [name],
     "with_wandb": True,
 }
@@ -40,7 +40,7 @@ for atari_game in atari_games:
             "env_frameskip": [3],
 
             # paper's params: model
-            "actor_critic_share_weights": [True],
+            "actor_critic_share_weights": [False],
             "encoder_conv_mlp_layers": [[512]],
             "nonlinearity": ["relu"],
 
@@ -62,7 +62,7 @@ for atari_game in atari_games:
             # paper's params: plasticity
             "delta": [0.99],
             "dr_threshold": [1.0],
-            "l2_init_loss_coeff": [0.01],
+            "l2_init_loss_coeff": [0.0, 0.01, 0.1],
             "count_montezuma_rooms": [True],
         },
     ]

@@ -502,21 +502,55 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
     def __init__(self, env):
         gym.Wrapper.__init__(self, env)
         self.visited_rooms = set()
+        self.heatmaps = {}
 
     def reset(self, **kwargs):
         self.visited_rooms = set()
-        curr_room = self.room_number()
+        curr_room = self.get_room_number()
+        if curr_room not in self.heatmaps:
+            self.heatmaps[curr_room] = np.zeros((84, 84))
+        x, y = self.get_position()
+        self.heatmaps[curr_room][y, x] += 1
+
         self.visited_rooms.add(curr_room)
         return self.env.reset(**kwargs)
 
     def step(self, action: int):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        curr_room = self.room_number()
+        curr_room = self.get_room_number()
+        if curr_room not in self.heatmaps:
+            self.heatmaps[curr_room] = np.zeros((84, 84))
+        x, y = self.get_position()
+        self.heatmaps[curr_room][y, x] += 1
         self.visited_rooms.add(curr_room)        
         info['episode_extra_stats'] = {"room_count": len(self.visited_rooms)}
+
+        if terminated | truncated:
+            for room in self.visited_rooms:
+                self.save_heatmap(room)
+
         return obs, reward, terminated, truncated, info
         
-    def room_number(self):
+    def get_room_number(self):
         ram = self.env.ale.getRAM()
         room_id = int(ram[3])
         return room_id
+    
+    def get_position(self):
+        ram = self.env.ale.getRAM()
+        x = int(ram[42])
+        y = int(ram[43])
+        grid_x = min(x // 4, 83)
+        grid_y = min(y // 4, 83)
+        return grid_x, grid_y
+    
+    def save_heatmap(self, room_id, output_dir='/homeplaceholder/images'):
+        # print(f"Saving heatmap for room {room_id}")
+        os.makedirs(output_dir, exist_ok=True)
+        heatmap = self.heatmaps[room_id]
+        normalized_heatmap = heatmap.astype(np.float32)
+        normalized_heatmap = (normalized_heatmap - normalized_heatmap.min()) / (np.ptp(normalized_heatmap) + 1e-8)
+        normalized_heatmap = np.uint8(255 * normalized_heatmap)
+
+        # Save the heatmap as a PNG file:
+        cv2.imwrite(os.path.join(output_dir, f"heatmap_{room_id}.png"), normalized_heatmap)
