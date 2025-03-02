@@ -34,7 +34,6 @@ from sf_examples.atari.models.utils import freeze_selected, unfreeze_selected
 # from sf_examples.nethack.datasets.roles import Alignment, Race, Role
 # from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected
 
-
 class MultiFileDataset(torch.utils.data.Dataset):
     def __init__(self, hdf5_files):
         import h5py  # import here to avoid import errors when MultiFileDataset is not needed/used
@@ -293,6 +292,11 @@ class DatasetLearner(Learner):
 
             values = result["values"].squeeze()
 
+            if self.cfg.with_rnd:
+                int_values = result["int_values"].squeeze()
+            else:
+                int_values = 0
+
             del core_outputs
 
         # these computations are not the part of the computation graph
@@ -336,10 +340,16 @@ class DatasetLearner(Learner):
 
                 targets = vs.to(self.device)
                 adv = adv.to(self.device)
+                int_targets = None
+            elif self.cfg.with_rnd:
+                adv = self.cfg.int_coeff * mb.int_advantages + self.cfg.ext_coeff * mb.advantages
+                targets = mb.returns
+                int_targets = mb.int_returns
             else:
                 # using regular GAE
                 adv = mb.advantages
                 targets = mb.returns
+                int_targets = None
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
@@ -351,7 +361,9 @@ class DatasetLearner(Learner):
             adv_std=adv_std,
             adv_mean=adv_mean,
             values=values,
+            int_values=int_values,
             targets=targets,
+            int_targets=int_targets,
             valids=valids,
         )
 
@@ -399,7 +411,7 @@ class DatasetLearner(Learner):
                 neurons_dict[module_name + '__' + layer_name] = num_neurons
                 dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
                 dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-                log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
+                # log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
         return dead_neurons
 
     def _grad_and_param_norms(self):
@@ -496,6 +508,21 @@ class DatasetLearner(Learner):
                 old_values = mb["values"]
                 value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
 
+                if self.cfg.with_rnd:
+                    int_values = mb_results["int_values"]
+                    old_int_values = mb["int_values"]
+                    int_targets = mb_results["int_targets"]
+                    # Value loss for int_critic
+                    int_value_loss = self._value_loss(int_values, old_int_values, int_targets, clip_value, valids, num_invalids)
+
+                    # Paper: for the predictor network we randomly drop out elements of the batch with keep probability 0:25
+                    mask = torch.rand(mb.x_target.shape[0], device=mb.x_target.device) > self.cfg.keep_prob
+                    # Predictor loss - MSE loss between (frozen) target & predictor networks
+                    predictor_loss = F.mse_loss(mb.x_pred[mask], mb.x_target[mask].detach())
+                else:
+                    int_value_loss = 0
+                    predictor_loss = 0
+
             with self.timing.add_time("kickstarting_loss"):
                 kickstarting_loss = self.kickstarting_loss_func(
                     mb_results["result"],
@@ -584,6 +611,8 @@ class DatasetLearner(Learner):
             per_layer_param_norms,
             regularizer_loss,
             regularizer_loss_summaries,
+            predictor_loss,
+            int_value_loss,
         )
 
     def _train(
@@ -626,6 +655,7 @@ class DatasetLearner(Learner):
 
             assert self.actor_critic.training
 
+
             with timing.add_time("freeze_model"):
                 if isinstance(self.actor_critic, KickStarter):
                     freeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
@@ -656,6 +686,10 @@ class DatasetLearner(Learner):
                     # enable syntactic sugar that allows us to access dict's keys as object attributes
                     mb = AttrDict(mb)
 
+                    # wandb logging for int_rewards - we need it in **locals() 
+                    if self.cfg.with_rnd:
+                        int_rewards = mb.int_rewards
+
                 with timing.add_time("calculate_losses"):
                     (
                         action_distribution,
@@ -671,13 +705,16 @@ class DatasetLearner(Learner):
                         per_layer_param_norms,
                         regularizer_loss,
                         regularizer_loss_summaries,
+                        predictor_loss,
+                        int_value_loss,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
-                    critic_loss = value_loss
-                    loss: Tensor = actor_loss + critic_loss + regularizer_loss
+                    critic_loss = 0.5*(value_loss + int_value_loss)
+
+                    loss: Tensor = actor_loss + critic_loss + regularizer_loss + predictor_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -797,14 +834,7 @@ class DatasetLearner(Learner):
                     synchronize(self.cfg, self.device)
                     # this will force policy update on the inference worker (policy worker)
                     self.policy_versions_tensor[self.policy_id] = self.train_step
-            
-                # snapshot = tracemalloc.take_snapshot()
-                # top_stats = snapshot.statistics('lineno')
 
-                # log.debug("[Top 10 memory-consuming lines]")
-                # for stat in top_stats[:10]:
-                #     log.debug(stat)
-                
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():
                 self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)

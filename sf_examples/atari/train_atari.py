@@ -230,6 +230,12 @@ def add_extra_params_general(parser):
     p.add_argument("--delta", type=float, default=0.01)  # threshold for effective rank
     p.add_argument("--repeat_action_probability", type=float, default=0.0) # for sticky actions
 
+    # RND
+    p.add_argument("--with_rnd", default=False, type=str2bool, help="Enables Random Network Distillation")
+    p.add_argument("--int_gamma", default=0.99, type=float, help="Gamma used for intrinsic rewards in RND")
+    p.add_argument("--int_coeff", default=1, type=float, help="coefficient/weight of intrinsic advatages in RND")
+    p.add_argument("--ext_coeff", default=2, type=float, help="coefficient/weight of extrinsic advatages in RND")
+    p.add_argument("--keep_prob", default=0.25, type=float, help="proportion of experience used for training predictor network in RND")
 
 def main():  # pragma: no cover
     """Script entry point."""

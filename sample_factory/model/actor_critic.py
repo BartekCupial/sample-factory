@@ -17,6 +17,7 @@ from sample_factory.model.action_parameterization import (
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.normalize import ObservationNormalizer
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
+# from sample_factory.utils.utils import log
 
 
 class ActorCritic(nn.Module, Configurable):
@@ -36,6 +37,11 @@ class ActorCritic(nn.Module, Configurable):
             self.returns_normalizer = RunningMeanStdInPlace(returns_shape)
             # comment this out for debugging (i.e. to be able to step through normalizer code)
             self.returns_normalizer = torch.jit.script(self.returns_normalizer)
+
+            if self.cfg.with_rnd:
+                # Separate normalizer that keeps stats for intrinsic returns
+                self.int_returns_normalizer = RunningMeanStdInPlace(returns_shape)
+                self.int_returns_normalizer = torch.jit.script(self.int_returns_normalizer)
 
         self.last_action_distribution = None  # to be populated after each forward step
 
@@ -153,7 +159,22 @@ class ActorCriticSharedWeights(ActorCritic):
         self.critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
 
+        self.with_rnd = cfg.with_rnd
         self.apply(self.initialize_weights)
+
+        # RND Networks
+        if self.with_rnd:
+            # TODO: should these use encoder architcture?
+            self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+
+            # Critic that estimates intrisic rewards
+            self.int_critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
+
+            # Freeze target network
+            for param in self.target_network.parameters():
+                param.requires_grad = False
+
         self.n_params = self.get_n_params()
 
     def get_n_params(self):
@@ -187,6 +208,11 @@ class ActorCriticSharedWeights(ActorCritic):
         values = self.critic(decoder_output).squeeze()
 
         result = TensorDict(values=values)
+
+        if self.with_rnd:
+            int_values = self.int_critic(decoder_output).squeeze()
+            result["int_values"] = int_values
+
         if values_only:
             return result
 
@@ -234,7 +260,22 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
 
+        self.with_rnd = cfg.with_rnd
         self.apply(self.initialize_weights)
+
+        # RND Networks
+        if self.with_rnd:
+            # TODO: should these use encoder architcture?
+            self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+
+            # Critic head that estimates intrisic rewards
+            self.int_critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
+
+            # Freeze target network
+            for param in self.target_network.parameters():
+                param.requires_grad = False
+
         self.n_params = self.get_n_params()
 
     def get_n_params(self):
@@ -325,6 +366,11 @@ class ActorCriticSeparateWeights(ActorCritic):
         values = self.critic(critic_decoder_output).squeeze()
 
         result = TensorDict(values=values)
+
+        if self.with_rnd:
+            int_values = self.int_critic(critic_decoder_output).squeeze()
+            result["int_values"] = int_values
+
         if values_only:
             # this can be further optimized - we don't need to calculate actor head/core just to get values
             return result
