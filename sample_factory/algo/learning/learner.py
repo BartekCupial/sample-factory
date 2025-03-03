@@ -889,6 +889,10 @@ class Learner(Configurable):
         
         stats.dead_neurons = var.dead_neurons
         stats.effective_rank = var.effective_rank
+        if self.cfg.with_rnd:
+            stats.int_rewards = var.int_rewards.mean()
+            stats.predictor_loss = var.predictor_loss
+            stats.int_value_loss = var.int_value_loss
 
         if self.train_step % 200 == 0:
             stats.per_layer_grad_norms = var.per_layer_grad_norms
@@ -1008,10 +1012,31 @@ class Learner(Configurable):
 
             # calculate estimated value for the next step (T+1)
             normalized_last_obs = buff["normalized_obs"][:, -1]
-            next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)["values"]
-            buff["values"][:, -1] = next_values
+            next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)
+            buff["values"][:, -1] = next_values["values"]
+
+            if self.actor_critic.with_rnd:
+                if "int_values" not in batch:
+                    # Calculate this for the full obs
+                    # Create int_values tensor with the same shape as values
+                    buff["int_values"] = torch.zeros_like(buff["values"])
+                    batch_size, seq_len = buff["int_values"].shape
+
+                    for t in range(seq_len):
+                        normalized_obs_t = buff["normalized_obs"][:, t]
+                        rnn_states_t = buff["rnn_states"][:, t]
+
+                        # Get intrinsic values from the intrinsic critic's value head
+                        next_values = self.actor_critic(normalized_obs_t, rnn_states_t, values_only=True)
+                        buff["int_values"][:, t] = next_values["int_values"]
+                else:
+                    # Only last obs
+                    buff["int_values"][:, -1] = next_values["int_values"] 
+
             if self.cfg.remove_critic:
                 buff["values"][:]=0
+                if self.actor_critic.with_rnd:
+                    buff["int_values"][:]=0
 
             if self.cfg.normalize_returns:
                 # Since our value targets are normalized, the values will also have normalized statistics.
@@ -1020,9 +1045,15 @@ class Learner(Configurable):
                 # https://github.com/Denys88/rl_games/blob/7b5f9500ee65ae0832a7d8613b019c333ecd932c/rl_games/algos_torch/models.py#L51
                 denormalized_values = buff["values"].clone()  # need to clone since normalizer is in-place
                 self.actor_critic.returns_normalizer(denormalized_values, denormalize=True)
+
+                if self.actor_critic.with_rnd:
+                    denormalized_int_values = buff["int_values"].clone()  # need to clone since normalizer is in-place
+                    self.actor_critic.int_returns_normalizer(denormalized_int_values, denormalize=True)
             else:
                 # values are not normalized in this case, so we can use them as is
                 denormalized_values = buff["values"]
+                if self.actor_critic.with_rnd:
+                    denormalized_int_values = buff["int_values"]
 
             if self.cfg.value_bootstrap:
                 # Value bootstrapping is a technique that reduces the surprise for the critic in case
@@ -1049,9 +1080,39 @@ class Learner(Configurable):
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
 
+                if self.actor_critic.with_rnd:
+                    batch_size, seq_len = buff["int_values"].shape
+                    embedding_dim = self.actor_critic.predictor_network.encoder_out_size
+
+                    buff["x_pred"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
+                    buff["x_target"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
+
+                    for t in range(seq_len-1):
+                        next_normalized_obs = buff["normalized_obs"][:, t+1]
+                        buff["x_pred"][:, t] = self.actor_critic.predictor_network(next_normalized_obs)
+                        with torch.no_grad():
+                            buff["x_target"][:, t] = self.actor_critic.target_network(next_normalized_obs)
+
+                    int_rewards = torch.norm(buff["x_pred"].detach() - buff["x_target"], p=2, dim=-1)
+                    buff["int_rewards"] = int_rewards / torch.sqrt(self.actor_critic.int_returns_normalizer.running_var + 1e-8)
+
+                    buff["int_advantages"] = gae_advantages(
+                        buff["int_rewards"],
+                        buff["dones"],
+                        denormalized_int_values,
+                        buff["valids"],
+                        self.cfg.int_gamma,
+                        self.cfg.gae_lambda,
+                    )
+                    # here returns are not normalized yet, so we should use denormalized values
+                    buff["int_returns"] = buff["int_advantages"] + buff["valids"][:, :-1] * denormalized_int_values[:, :-1]
+
             # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
             for key in ["normalized_obs", "rnn_states", "values", "valids"]:
                 buff[key] = buff[key][:, :-1]
+
+            if self.actor_critic.with_rnd:
+                buff["int_values"] = buff["int_values"][:, :-1]
 
             dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
             for d, k, v in iterate_recursively(buff):
@@ -1064,6 +1125,9 @@ class Learner(Configurable):
             # return normalization parameters are only used on the learner, no need to lock the mutex
             if self.cfg.normalize_returns:
                 self.actor_critic.returns_normalizer(buff["returns"])  # in-place
+
+                if self.actor_critic.with_rnd:
+                    self.actor_critic.int_returns_normalizer(buff["int_returns"])  # in-place
 
             num_invalids = dataset_size - buff["valids"].sum().item()
             if num_invalids > 0:
@@ -1078,6 +1142,10 @@ class Learner(Configurable):
                 # likewise, some invalid values of log_prob_actions can cause NaNs or infs
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
+            if self.cfg.with_rnd:
+                log.debug(f"[RND] rewards={buff['rewards'].mean()}, int_rewards={buff['int_rewards'].mean()}")
+            else:
+                log.debug(f"[OLD] rewards={buff['rewards'].mean()}")
             return buff, dataset_size, num_invalids
 
     def train(self, batch: TensorDict) -> Optional[Dict]:
