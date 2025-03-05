@@ -241,6 +241,9 @@ class DatasetLearner(Learner):
         return kickstarting_loss
 
     def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
+        x_pred = None
+        x_target = None
+
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
             valids = mb.valids
@@ -299,6 +302,9 @@ class DatasetLearner(Learner):
 
             del core_outputs
 
+        if self.cfg.with_rnd:
+            x_pred = self.actor_critic.predictor_network(mb.normalized_obs_int)
+
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
             if self.cfg.with_vtrace:
@@ -345,6 +351,7 @@ class DatasetLearner(Learner):
                 adv = self.cfg.int_coeff * mb.int_advantages + self.cfg.ext_coeff * mb.advantages
                 targets = mb.returns
                 int_targets = mb.int_returns
+                x_target = self.actor_critic.target_network(mb.normalized_obs_int)
             else:
                 # using regular GAE
                 adv = mb.advantages
@@ -365,6 +372,8 @@ class DatasetLearner(Learner):
             targets=targets,
             int_targets=int_targets,
             valids=valids,
+            x_pred=x_pred,
+            x_target=x_target,
         )
 
     def _calculate_neuron_score_all_layers(self, activations):
@@ -512,16 +521,19 @@ class DatasetLearner(Learner):
                     int_values = mb_results["int_values"]
                     old_int_values = mb["int_values"]
                     int_targets = mb_results["int_targets"]
+                    x_pred = mb_results["x_pred"]
+                    x_target = mb_results["x_target"]
+                    
                     # Value loss for int_critic - just MSE, no PPO clipping
                     int_value_loss = self._value_loss(int_values, old_int_values, int_targets, 0.0, valids, num_invalids)
 
                     # Predictor loss - MSE loss between (frozen) target & predictor networks
-                    predictor_loss = F.mse_loss(mb.x_pred, mb.x_target.detach(), reduction="none").mean(-1)
+                    predictor_loss = F.mse_loss(x_pred, x_target.detach(), reduction="none").mean(-1)
 
                     # Paper: for the predictor network we randomly drop out elements of the batch with keep probability 0:25
-                    mask = torch.rand(len(predictor_loss), device=mb.x_target.device) < self.cfg.keep_prob
+                    mask = torch.rand(len(predictor_loss), device=x_target.device) < self.cfg.keep_prob
                     mask = mask.float()  
-                    predictor_loss = (predictor_loss * mask).sum() / torch.max(mask.sum(), torch.tensor(1.0, device=mb.x_target.device))
+                    predictor_loss = (predictor_loss * mask).sum() / torch.max(mask.sum(), torch.tensor(1.0, device=x_target.device))
 
                     # mask = torch.rand(mb.x_target.shape[0], device=mb.x_target.device) > self.cfg.keep_prob
                     # predictor_loss = F.mse_loss(mb.x_pred[mask], mb.x_target[mask].detach())

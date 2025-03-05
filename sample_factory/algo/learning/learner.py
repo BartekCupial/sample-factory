@@ -1116,16 +1116,16 @@ class Learner(Configurable):
                     # embedding_dim = self.actor_critic.predictor_network.encoder_out_size
                     embedding_dim = 512  # hardcoded in target/predictor networks
 
-                    buff["x_pred"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
-                    buff["x_target"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
+                    x_pred = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
+                    x_target = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
 
                     for t in range(seq_len-1):
                         next_normalized_obs = buff["normalized_obs_int"]['obs'][:, t+1]
-                        buff["x_pred"][:, t] = self.actor_critic.predictor_network(next_normalized_obs)  # Not sure if hard-coding 'obs' is a good idea
+                        x_pred[:, t] = self.actor_critic.predictor_network(next_normalized_obs)  # Not sure if hard-coding 'obs' is a good idea
                         with torch.no_grad():
-                            buff["x_target"][:, t] = self.actor_critic.target_network(next_normalized_obs)
+                            x_target[:, t] = self.actor_critic.target_network(next_normalized_obs)
 
-                    int_rewards = torch.norm(buff["x_pred"].detach() - buff["x_target"], p=2, dim=-1)  
+                    int_rewards = torch.norm(x_pred - x_target, p=2, dim=-1)  
                     int_rewards_per_env = np.array(
                         [self.actor_critic.discounted_reward.update(reward_per_step) for reward_per_step in int_rewards.cpu().data.numpy().T]
                     )
@@ -1157,7 +1157,7 @@ class Learner(Configurable):
 
             if self.actor_critic.with_rnd:
                 buff["int_values"] = buff["int_values"][:, :-1]
-                del buff["normalized_obs_int"]  # don't need these anymore
+                buff["normalized_obs_int"] = buff["normalized_obs_int"]["obs"][:, :-1]
 
             dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
             for d, k, v in iterate_recursively(buff):
