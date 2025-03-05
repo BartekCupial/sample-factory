@@ -30,7 +30,7 @@ from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
-
+import wandb
 
 class LearningRateScheduler:
     def update(self, current_lr, recent_kls):
@@ -889,6 +889,7 @@ class Learner(Configurable):
         
         stats.dead_neurons = var.dead_neurons
         stats.effective_rank = var.effective_rank
+        stats.l2_init_loss = var.l2_init_loss
 
         if self.train_step % 200 == 0:
             stats.per_layer_grad_norms = var.per_layer_grad_norms
