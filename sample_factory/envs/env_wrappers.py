@@ -526,8 +526,10 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
         info['episode_extra_stats'] = {"room_count": len(self.visited_rooms)}
 
         if terminated | truncated:
+            info['episode_heatmaps'] = self.heatmaps
             for room in self.visited_rooms:
-                self.save_heatmap(room)
+                # self.save_heatmap(room)
+                pass
 
         return obs, reward, terminated, truncated, info
         

@@ -295,6 +295,7 @@ class ActorState:
             reward=self.last_episode_reward,
             len=self.last_episode_duration,
             episode_extra_stats=info.get("episode_extra_stats", dict()),
+            # episode_heatmaps=info.get("episode_heatmaps", dict()),
         )
 
         if (true_objective := info.get("true_objective", self.last_episode_reward)) is not None:
