@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import torch
 from torch import Tensor, nn
 from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
+import numpy as np
 
 from sample_factory.algo.utils.action_distributions import is_continuous_action_space, sample_actions_log_probs
 from sample_factory.algo.utils.running_mean_std import RunningMeanStdInPlace, running_mean_std_summaries
@@ -17,7 +18,22 @@ from sample_factory.model.action_parameterization import (
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.normalize import ObservationNormalizer
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
-# from sample_factory.utils.utils import log
+from sample_factory.utils.utils import log
+
+from gymnasium.wrappers.normalize import RunningMeanStd
+
+
+class RewardForwardFilter:
+    def __init__(self, gamma):
+        self.rewems = None
+        self.gamma = gamma
+
+    def update(self, rews):
+        if self.rewems is None:
+            self.rewems = rews
+        else:
+            self.rewems = self.rewems * self.gamma + rews
+        return self.rewems
 
 
 class ActorCritic(nn.Module, Configurable):
@@ -42,6 +58,9 @@ class ActorCritic(nn.Module, Configurable):
                 # Separate normalizer that keeps stats for intrinsic returns
                 self.int_returns_normalizer = RunningMeanStdInPlace(returns_shape)
                 self.int_returns_normalizer = torch.jit.script(self.int_returns_normalizer)
+
+                self.discounted_reward = RewardForwardFilter(self.cfg.int_gamma)
+                self.reward_rms = RunningMeanStd()
 
         self.last_action_distribution = None  # to be populated after each forward step
 
@@ -165,8 +184,42 @@ class ActorCriticSharedWeights(ActorCritic):
         # RND Networks
         if self.with_rnd:
             # TODO: should these use encoder architcture?
-            self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
-            self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            # self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            # self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+
+            # Copied from: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_rnd_envpool.py
+            def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+                torch.nn.init.orthogonal_(layer.weight, std)
+                torch.nn.init.constant_(layer.bias, bias_const)
+                return layer
+
+            # Prediction network
+            self.predictor_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+            )
+
+            # Target network
+            self.target_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+            )
 
             # Critic that estimates intrisic rewards
             self.int_critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
@@ -190,7 +243,7 @@ class ActorCriticSharedWeights(ActorCritic):
 
         for decoder in self.decoders:
             self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
-        
+
         n_params = sum(p.numel() for p in self.parameters())
 
         return n_params
@@ -266,8 +319,42 @@ class ActorCriticSeparateWeights(ActorCritic):
         # RND Networks
         if self.with_rnd:
             # TODO: should these use encoder architcture?
-            self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
-            self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            # self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            # self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+
+            # Copied from: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_rnd_envpool.py
+            def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+                torch.nn.init.orthogonal_(layer.weight, std)
+                torch.nn.init.constant_(layer.bias, bias_const)
+                return layer
+
+            # Prediction network
+            self.predictor_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+            )
+
+            # Target network
+            self.target_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+            )
 
             # Critic head that estimates intrisic rewards
             self.int_critic = model_factory.make_model_critic_func(cfg, self.critic_decoder.get_out_size())
@@ -291,7 +378,7 @@ class ActorCriticSeparateWeights(ActorCritic):
 
         for decoder in self.decoders:
             self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
-        
+
         n_params = sum(p.numel() for p in self.parameters())
 
         return n_params

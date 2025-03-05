@@ -989,6 +989,34 @@ class Learner(Configurable):
 
         return normalized_obs
 
+    def _prepare_and_normalize_obs_int(self, obs: TensorDict) -> TensorDict:
+        normalized_obs = {}
+        
+        # Assuming you want to normalize a specific channel or transform multi-channel obs
+        for key, x in obs.items():
+            # If x is 4D tensor [batch, time, channels, height, width]
+            if len(x.shape) == 5:
+                # Select specific channel or process as needed
+                x_for_norm = x[:, :, 3, :, :].reshape(-1, 1, 84, 84)
+            else:
+                x_for_norm = x
+            
+            # Create normalizer on device
+            mean = torch.from_numpy(self.actor_critic.obs_normalizer.running_mean).to(x.device).float()
+            var = torch.from_numpy(self.actor_critic.obs_normalizer.running_var).to(x.device).float()
+            
+            # Normalize and clip
+            normalized_x = (
+                (x_for_norm - mean) 
+                / torch.sqrt(var + 1e-8)
+            ).clip(-5, 5).float()
+            
+            # Restore original shape
+            normalized_x = normalized_x.view(x.shape)
+            normalized_obs[key] = normalized_x
+        
+        return normalized_obs
+
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
             # create a shallow copy so we can modify the dictionary
@@ -1008,6 +1036,9 @@ class Learner(Configurable):
                 self.actor_critic.train()
 
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
+            if self.actor_critic.with_rnd:
+                buff["normalized_obs_int"] = {k: v.clip(-5, 5) for k, v in buff["normalized_obs"].items()}
+
             del buff["obs"]  # don't need non-normalized obs anymore
 
             # calculate estimated value for the next step (T+1)
@@ -1082,23 +1113,36 @@ class Learner(Configurable):
 
                 if self.actor_critic.with_rnd:
                     batch_size, seq_len = buff["int_values"].shape
-                    embedding_dim = self.actor_critic.predictor_network.encoder_out_size
+                    # embedding_dim = self.actor_critic.predictor_network.encoder_out_size
+                    embedding_dim = 512  # hardcoded in target/predictor networks
 
                     buff["x_pred"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
                     buff["x_target"] = torch.zeros((batch_size, seq_len-1, embedding_dim), device=buff["values"].device)
 
                     for t in range(seq_len-1):
-                        next_normalized_obs = buff["normalized_obs"][:, t+1]
-                        buff["x_pred"][:, t] = self.actor_critic.predictor_network(next_normalized_obs)
+                        next_normalized_obs = buff["normalized_obs_int"]['obs'][:, t+1]
+                        buff["x_pred"][:, t] = self.actor_critic.predictor_network(next_normalized_obs)  # Not sure if hard-coding 'obs' is a good idea
                         with torch.no_grad():
                             buff["x_target"][:, t] = self.actor_critic.target_network(next_normalized_obs)
 
-                    int_rewards = torch.norm(buff["x_pred"].detach() - buff["x_target"], p=2, dim=-1)
-                    buff["int_rewards"] = int_rewards / torch.sqrt(self.actor_critic.int_returns_normalizer.running_var + 1e-8)
+                    int_rewards = torch.norm(buff["x_pred"].detach() - buff["x_target"], p=2, dim=-1)  
+                    int_rewards_per_env = np.array(
+                        [self.actor_critic.discounted_reward.update(reward_per_step) for reward_per_step in int_rewards.cpu().data.numpy().T]
+                    )
+                    mean, std, count = (
+                        np.mean(int_rewards_per_env),
+                        np.std(int_rewards_per_env),
+                        len(int_rewards_per_env),
+                    )
+                    
+                    self.actor_critic.reward_rms.update_from_moments(mean, std**2, count)
 
+                    buff["int_rewards"] = int_rewards / np.sqrt(self.actor_critic.reward_rms.var)
+                    # buff["int_rewards"] = int_rewards / torch.sqrt(self.actor_critic.int_returns_normalizer.running_var + 1e-8)
+                    zero_dones = torch.zeros_like(buff["dones"])
                     buff["int_advantages"] = gae_advantages(
                         buff["int_rewards"],
-                        buff["dones"],
+                        zero_dones,
                         denormalized_int_values,
                         buff["valids"],
                         self.cfg.int_gamma,
@@ -1113,6 +1157,7 @@ class Learner(Configurable):
 
             if self.actor_critic.with_rnd:
                 buff["int_values"] = buff["int_values"][:, :-1]
+                del buff["normalized_obs_int"]  # don't need these anymore
 
             dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
             for d, k, v in iterate_recursively(buff):

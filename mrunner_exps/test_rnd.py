@@ -42,7 +42,7 @@ for atari_game in atari_games:
                 "seed": list(range(1)),
                 "learning_rate": [learning_rate],
                 "env": [f"atari_{atari_game}"],
-                "actor_critic_share_weights": [False],
+                "actor_critic_share_weights": [True],
                 "delta": [0.99],
                 "with_rnd": [True],
                 "gamma": [0.999],  # extrinsic gamma

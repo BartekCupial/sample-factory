@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 200_000_000,
+    "train_for_env_steps": 500_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,  # 8*16=128 - like in the paper
@@ -15,9 +15,9 @@ config = {
     "restart_behavior": "overwrite",
     "save_milestones_ith": 10_000_000,
     # Wandb settings
-    "wandb_user": "e-dobrowolska",
+    "wandb_user": "ideas-ncbr",
     "wandb_project": "atari",
-    "wandb_group": "montezuma rnd",
+    "wandb_group": "montezuma rnd v3",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -39,15 +39,16 @@ for atari_game in atari_games:
             {
                 "seed": list(range(1)),
                 "learning_rate": [learning_rate],
-                "async_rl": [True, False],
+                "async_rl": [True],
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [True, False],
                 "delta": [0.99],
-                "with_rnd": [True],
+                "with_rnd": [True, False],
                 "gamma": [0.999],  # extrinsic gamma
                 "num_epochs": [4],
                 "exploration_loss_coeff": [0.001],
-                "repeat_action_probability": [0.0, 0.25],
+                "repeat_action_probability": [0.25],
+                "encoder_mlp_layers": [[448, 448]],  # like in ClearRL
             },
         ]
 

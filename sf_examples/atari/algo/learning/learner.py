@@ -512,13 +512,19 @@ class DatasetLearner(Learner):
                     int_values = mb_results["int_values"]
                     old_int_values = mb["int_values"]
                     int_targets = mb_results["int_targets"]
-                    # Value loss for int_critic
-                    int_value_loss = self._value_loss(int_values, old_int_values, int_targets, clip_value, valids, num_invalids)
+                    # Value loss for int_critic - just MSE, no PPO clipping
+                    int_value_loss = self._value_loss(int_values, old_int_values, int_targets, 0.0, valids, num_invalids)
+
+                    # Predictor loss - MSE loss between (frozen) target & predictor networks
+                    predictor_loss = F.mse_loss(mb.x_pred, mb.x_target.detach(), reduction="none").mean(-1)
 
                     # Paper: for the predictor network we randomly drop out elements of the batch with keep probability 0:25
-                    mask = torch.rand(mb.x_target.shape[0], device=mb.x_target.device) > self.cfg.keep_prob
-                    # Predictor loss - MSE loss between (frozen) target & predictor networks
-                    predictor_loss = F.mse_loss(mb.x_pred[mask], mb.x_target[mask].detach())
+                    mask = torch.rand(len(predictor_loss), device=mb.x_target.device) < self.cfg.keep_prob
+                    mask = mask.float()  
+                    predictor_loss = (predictor_loss * mask).sum() / torch.max(mask.sum(), torch.tensor(1.0, device=mb.x_target.device))
+
+                    # mask = torch.rand(mb.x_target.shape[0], device=mb.x_target.device) > self.cfg.keep_prob
+                    # predictor_loss = F.mse_loss(mb.x_pred[mask], mb.x_target[mask].detach())
                 else:
                     int_value_loss = 0
                     predictor_loss = 0
@@ -712,7 +718,7 @@ class DatasetLearner(Learner):
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
-                    critic_loss = 0.5*(value_loss + int_value_loss)
+                    critic_loss = value_loss + int_value_loss
 
                     loss: Tensor = actor_loss + critic_loss + regularizer_loss + predictor_loss
 
