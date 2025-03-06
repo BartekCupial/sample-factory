@@ -523,10 +523,13 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
         x, y = self.get_position()
         self.heatmaps[curr_room][y, x] += 1
         self.visited_rooms.add(curr_room)        
-        info['episode_extra_stats'] = {"room_count": len(self.visited_rooms)}
+        info['episode_extra_stats'] = {
+            "room_count": len(self.visited_rooms),
+            # "episode_heatmaps": self.heatmaps,
+            }
 
         if terminated | truncated:
-            info['episode_heatmaps'] = self.heatmaps
+            info['episode_extra_stats']['episode_heatmaps'] = self.heatmaps
             for room in self.visited_rooms:
                 # self.save_heatmap(room)
                 pass
