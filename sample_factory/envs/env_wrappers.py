@@ -496,3 +496,27 @@ class StickyActionEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
         if self.np_random.random() >= self.action_repeat_probability:
             self._sticky_action = action
         return self.env.step(self._sticky_action)
+
+
+class MontezumaRoomCountWrapper(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
+        self.visited_rooms = set()
+
+    def reset(self, **kwargs):
+        self.visited_rooms = set()
+        curr_room = self.room_number()
+        self.visited_rooms.add(curr_room)
+        return self.env.reset(**kwargs)
+
+    def step(self, action: int):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        curr_room = self.room_number()
+        self.visited_rooms.add(curr_room)        
+        info['episode_extra_stats'] = {"room_count": len(self.visited_rooms)}
+        return obs, reward, terminated, truncated, info
+        
+    def room_number(self):
+        ram = self.env.ale.getRAM()
+        room_id = int(ram[3])
+        return room_id
