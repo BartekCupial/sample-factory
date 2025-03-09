@@ -891,6 +891,7 @@ class Learner(Configurable):
         stats.effective_rank = var.effective_rank
         if self.cfg.with_rnd:
             stats.int_rewards = var.int_rewards.mean()
+            stats.curiosity_rewards = var.curiosity_rewards.mean()
             stats.predictor_loss = var.predictor_loss
             stats.int_value_loss = var.int_value_loss
 
@@ -1125,7 +1126,9 @@ class Learner(Configurable):
                         with torch.no_grad():
                             x_target[:, t] = self.actor_critic.target_network(next_normalized_obs)
 
-                    int_rewards = torch.norm(x_pred - x_target, p=2, dim=-1)  
+                    # int_rewards = torch.norm(x_pred - x_target, p=2, dim=-1)  
+                    int_rewards = ((x_target - x_pred).pow(2).sum(2) / 2).data
+
                     int_rewards_per_env = np.array(
                         [self.actor_critic.discounted_reward.update(reward_per_step) for reward_per_step in int_rewards.cpu().data.numpy().T]
                     )
@@ -1137,6 +1140,7 @@ class Learner(Configurable):
                     
                     self.actor_critic.reward_rms.update_from_moments(mean, std**2, count)
 
+                    buff["curiosity_rewards"] = int_rewards  # for logging
                     buff["int_rewards"] = int_rewards / np.sqrt(self.actor_critic.reward_rms.var)
                     # buff["int_rewards"] = int_rewards / torch.sqrt(self.actor_critic.int_returns_normalizer.running_var + 1e-8)
                     zero_dones = torch.zeros_like(buff["dones"])
@@ -1188,7 +1192,7 @@ class Learner(Configurable):
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
             if self.cfg.with_rnd:
-                log.debug(f"[RND] rewards={buff['rewards'].mean()}, int_rewards={buff['int_rewards'].mean()}")
+                log.debug(f"[RND] rewards={buff['rewards'].mean()}, curiosity_rewards={buff['curiosity_rewards'].mean()}, int_rewards={buff['int_rewards'].mean()}")
             else:
                 log.debug(f"[OLD] rewards={buff['rewards'].mean()}")
             return buff, dataset_size, num_invalids

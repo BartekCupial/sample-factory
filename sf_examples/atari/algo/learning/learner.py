@@ -349,6 +349,10 @@ class DatasetLearner(Learner):
                 int_targets = None
             elif self.cfg.with_rnd:
                 adv = self.cfg.int_coeff * mb.int_advantages + self.cfg.ext_coeff * mb.advantages
+
+                # cleanrl normalizes advantages
+                adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+                
                 targets = mb.returns
                 int_targets = mb.int_returns
                 x_target = self.actor_critic.target_network(mb.normalized_obs_int)
@@ -395,32 +399,68 @@ class DatasetLearner(Learner):
         return all_layers_score
 
     def _dead_neurons(self, tau):
+        dead_neurons = {}
+
         if self.cfg.actor_critic_share_weights:
             activations = {
                             "encoder": self.actor_critic.encoder.activations, 
                             "decoder": self.actor_critic.decoder.activations,
                           }
+            # for dormant ratio
+            n_dead = 0
+            n_total = 0
+
+            for module_name, activations_dict in activations.items():
+                all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+                for layer_name, layer_scores in all_layers_scores.items():
+                    num_neurons = layer_scores.shape[0]
+                    num_dead_neurons = (layer_scores <= tau).sum().item()
+
+                    dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+                    dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+
+                    n_dead += num_dead_neurons
+                    n_total += num_neurons
+
+            dead_neurons["dormant_ratio"] = n_dead/n_total
+
         else:
             activations = {
                             "actor_encoder": self.actor_critic.actor_encoder.activations,
                             "actor_decoder": self.actor_critic.actor_decoder.activations,
-                            "critic_decoder": self.actor_critic.critic_encoder.activations,
+                            "critic_encoder": self.actor_critic.critic_encoder.activations,
                             "critic_decoder": self.actor_critic.critic_decoder.activations,
                           }
 
-        neurons_dict = {}  
-        dead_neurons = {}
-        
-        for module_name, activations_dict in activations.items():
-            all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
-            for layer_name, layer_scores in all_layers_scores.items():
-                num_neurons = layer_scores.shape[0]
-                num_dead_neurons = (layer_scores <= tau).sum().item()
+            # for dormant ratio
+            n_dead_actor = 0
+            n_dead_critic = 0
+            n_total_actor = 0
+            n_total_critic = 0
 
-                neurons_dict[module_name + '__' + layer_name] = num_neurons
-                dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
-                dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-                # log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
+            for module_name, activations_dict in activations.items():
+                all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+                for layer_name, layer_scores in all_layers_scores.items():
+                    num_neurons = layer_scores.shape[0]
+                    num_dead_neurons = (layer_scores <= tau).sum().item()
+
+                    dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+                    dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+
+                    if "actor" in module_name:
+                        n_dead_actor += num_dead_neurons
+                        n_total_actor += num_neurons
+                    if "critic" in module_name:
+                        n_dead_critic += num_dead_neurons
+                        n_total_critic += num_neurons
+
+
+            dead_neurons["dormant_ratio_actor"] = n_dead_actor/n_total_actor
+            dead_neurons["dormant_ratio_critic"] = n_dead_critic/n_total_critic
+            dead_neurons["dormant_ratio"] = (n_dead_actor + n_dead_critic)/(n_total_actor + n_total_critic)
+
+        self.curr_dormant_ratio = dead_neurons["dormant_ratio"]
+
         return dead_neurons
 
     def _grad_and_param_norms(self):
@@ -704,9 +744,10 @@ class DatasetLearner(Learner):
                     # enable syntactic sugar that allows us to access dict's keys as object attributes
                     mb = AttrDict(mb)
 
-                    # wandb logging for int_rewards - we need it in **locals() 
+                    # wandb logging for int_rewards and curiosity_rewards - we need it in **locals() 
                     if self.cfg.with_rnd:
                         int_rewards = mb.int_rewards
+                        curiosity_rewards = mb.curiosity_rewards
 
                 with timing.add_time("calculate_losses"):
                     (
