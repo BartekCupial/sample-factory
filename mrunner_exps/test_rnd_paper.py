@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 1_000_000_000,
+    "train_for_env_steps": 2_000_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,  # 8*16=128 - like in the paper
@@ -17,7 +17,7 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari",
-    "wandb_group": "montezuma rnd v4",
+    "wandb_group": "montezuma, basic exploration stats",
     "wandb_tags": [name],
     "batch_size": 4096,  # like in ClearRL
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -43,7 +43,7 @@ for atari_game in atari_games:
                 "env": [f"atari_{atari_game}"],
                 "actor_critic_share_weights": [True],
                 "delta": [0.99],
-                "with_rnd": [True],
+                "with_rnd": [True, False],
                 "gamma": [0.999],  # extrinsic gamma
                 "gae_lambda": [0.95],
                 "num_epochs": [4],
@@ -54,8 +54,13 @@ for atari_game in atari_games:
                 "adam_eps": [1e-5],  # like in ClearRL
 
                 # Warm-up workaround
-                "freeze": [{"encoder": 0, "core": 0, "decoder": 0, "predictor_network": 0, "critic": 0, "int_critic": 0}],
-                "unfreeze": [{"encoder": 6400, "core": 6400, "decoder": 6400, "predictor_network": 6400, "critic": 6400, "int_critic": 6400}],
+                # rnd
+                # "freeze": [{"encoder": 0, "core": 0, "decoder": 0, "predictor_network": 0, "critic": 0, "int_critic": 0}],
+                # "unfreeze": [{"encoder": 6400, "core": 6400, "decoder": 6400, "predictor_network": 6400, "critic": 6400, "int_critic": 6400}],
+
+                # No rnd
+                "freeze": [{"encoder": 0, "core": 0, "decoder": 0,  "critic": 0}],
+                "unfreeze": [{"encoder": 6400, "core": 6400, "decoder": 6400, "critic": 6400}],
             },
         ]
 
