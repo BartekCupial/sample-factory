@@ -501,38 +501,57 @@ class StickyActionEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
 class MontezumaRoomCountWrapper(gym.Wrapper):
     def __init__(self, env):
         gym.Wrapper.__init__(self, env)
-        self.visited_rooms = set()
+        self.visited_rooms = np.zeros(24)
+        self.unique_positions = np.zeros(24)
+        self.positions_tracker = [set() for _ in range(24)]
         self.heatmaps = {}
+        self.episode_length = 0
 
     def reset(self, **kwargs):
-        self.visited_rooms = set()
+        self.episode_length = 1
+        self.visited_rooms = np.zeros(24)
+        self.heatmaps = {}
         curr_room = self.get_room_number()
-        if curr_room not in self.heatmaps:
-            self.heatmaps[curr_room] = np.zeros((84, 84))
+        if f"heatmap_{curr_room-1}" not in self.heatmaps:
+            self.heatmaps[f"heatmap_{curr_room-1}"] = np.zeros((84, 84))
         x, y = self.get_position()
-        self.heatmaps[curr_room][y, x] += 1
+        self.heatmaps[f"heatmap_{curr_room-1}"][y, x] += 1
+        self.visited_rooms[curr_room-1] +=1
 
-        self.visited_rooms.add(curr_room)
+        if (x,y) not in self.positions_tracker[curr_room-1]:
+            self.positions_tracker[curr_room-1].add((x,y))
+            self.unique_positions[curr_room-1] += 1
+
         return self.env.reset(**kwargs)
 
     def step(self, action: int):
+        self.episode_length +=1
         obs, reward, terminated, truncated, info = self.env.step(action)
         curr_room = self.get_room_number()
-        if curr_room not in self.heatmaps:
-            self.heatmaps[curr_room] = np.zeros((84, 84))
-        x, y = self.get_position()
-        self.heatmaps[curr_room][y, x] += 1
-        self.visited_rooms.add(curr_room)        
+        if f"heatmap_{curr_room}" not in self.heatmaps:
+            self.heatmaps[f"heatmap_{curr_room}"] = np.zeros((84, 84))
+        x, y = self.get_position()        
+        self.heatmaps[f"heatmap_{curr_room}"][y, x] += 1
+        self.visited_rooms[curr_room-1] +=1
+
+        #self.visited_rooms.add(curr_room)        
         info['episode_extra_stats'] = {
-            "room_count": len(self.visited_rooms),
-            # "episode_heatmaps": self.heatmaps,
+            "room_count": np.count_nonzero(self.visited_rooms),
             }
 
         if terminated | truncated:
-            info['episode_extra_stats']['episode_heatmaps'] = self.heatmaps
-            for room in self.visited_rooms:
-                # self.save_heatmap(room)
-                pass
+            # info['episode_extra_stats'].update(**self.heatmaps)
+            # info['episode_extra_stats']["visitation_frequency"] = self.visited_rooms/self.episode_length
+            
+            for i in range(24):
+                if self.visited_rooms[i]:
+                    info['episode_extra_stats'][f"visitation_frequency_{i+1}"] = (self.visited_rooms[i]/self.episode_length).item()
+                    info['episode_extra_stats'][f"unique_positions_{i+1}"] = (self.unique_positions[i]).item()
+                
+            # info['episode_extra_stats']['episode_heatmaps'] = self.heatmaps
+            # for room in self.visited_rooms.keys():
+            #     # self.save_heatmap(room)
+            #     info['episode_extra_stats'][f'freq_{room}'] = self.visited_rooms[room]/info["episode"]["l"]
 
         return obs, reward, terminated, truncated, info
         
