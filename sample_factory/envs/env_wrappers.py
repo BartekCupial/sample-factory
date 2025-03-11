@@ -540,8 +540,8 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
             }
 
         if terminated | truncated:
-            # info['episode_extra_stats'].update(**self.heatmaps)
-            # info['episode_extra_stats']["visitation_frequency"] = self.visited_rooms/self.episode_length
+            info['episode_extra_stats'].update(**self.heatmaps)
+            info['episode_extra_stats']["visitation_frequency"] = self.visited_rooms/self.episode_length
             
             for i in range(24):
                 if self.visited_rooms[i]:

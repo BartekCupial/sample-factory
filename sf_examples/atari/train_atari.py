@@ -261,7 +261,7 @@ def main():  # pragma: no cover
     # status = run_rl(cfg)
 
     cfg, runner = make_runner(cfg)
-    # register_msg_handlers(cfg, runner)
+    register_msg_handlers(cfg, runner)
 
     status = runner.init()
     if status == ExperimentStatus.SUCCESS:

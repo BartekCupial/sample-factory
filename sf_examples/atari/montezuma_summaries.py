@@ -8,6 +8,7 @@ from typing import Dict, Optional
 import numpy as np
 from tensorboardX import SummaryWriter
 import matplotlib.pyplot as plt
+from collections import deque
 
 
 def make_plot(y):
@@ -24,40 +25,68 @@ def make_plot(y):
 
 @static_vars(stackplot=dict(), heatmaps=dict())
 def montezuma_extra_episodic_stats_processing(runner: Runner, msg: Dict, policy_id: PolicyID) -> None:
+    episode_stats = msg[EPISODIC].get("episode_extra_stats", {})
+
     heatmaps = montezuma_extra_episodic_stats_processing.heatmaps
     stackplot = montezuma_extra_episodic_stats_processing.stackplot
-
-    episode_stats = msg[EPISODIC].get("episode_extra_stats", {})
     
     if policy_id not in heatmaps:
+        log.debug(f"policy_id not in heatmaps, setting dict()")
         heatmaps[policy_id] = dict()
 
     if policy_id not in stackplot:
-        stackplot[policy_id] = dict()
-    
-    h = heatmaps[policy_id]
-    s = stackplot[policy_id]
+        log.debug(f"policy_id not in stachplot, setting []")
+        stackplot[policy_id] = []
     
     for stat_key, stat_value in episode_stats.items():
         if "heatmap" in stat_key:
-            pass
-        elif "visitation_frequency" in stat_key:
-            pass
+            room_id = stat_key.split("_")[1]
 
-@static_vars(saved=False)
+            if room_id not in heatmaps[policy_id]:
+                heatmaps[policy_id][room_id] = []
+
+            heatmaps[policy_id][room_id].append(stat_value)
+            # log.debug(f"Found a heatmap: {stat_value.mean()}, now len is {len(heatmaps[policy_id][room_id])}")
+
+        elif "visitation_frequency" == stat_key:
+            stackplot[policy_id].append(stat_value)
+
+# @static_vars(saved=False)
 def montezuma_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: int, summary_writer: SummaryWriter) -> None:
-    # if env_steps > 0 and env_steps % 500000 == 0:
-    #     heatmaps = montezuma_extra_episodic_stats_processing.heatmaps
-    #     heatmaps = heatmaps[policy_id]
-    #     for k, v in heatmaps.items():
-    #         summary_writer.add_image(f"policy_stats/montezuma_heatmap_{k}", v, env_steps)
     heatmaps = montezuma_extra_episodic_stats_processing.heatmaps
+    cfg = runner.cfg
+    # saved = montezuma_extra_summaries.saved
+
     if policy_id not in heatmaps:
+        log.debug(f"[EX] Policy id not in heatmaps, returning")
         return
+
+    log.debug(f"Hello from the heatmap saver! Env_steps is {env_steps}")
     
-    for room in heatmaps[policy_id].keys():
-        summary_writer.add_image(f"heatmaps/room_{room}", heatmaps[policy_id][room], env_steps)
-    log.debug(f"Saved!!!")
+    policy_avg_stats = runner.policy_avg_stats
+    
+    for room_id in heatmaps[policy_id].keys():
+        mean_heatmap = np.mean(heatmaps[policy_id][room_id], axis=0)
 
+        if env_steps > 10_000_000:
+            log.debug(f"Watch out, saving!!")
 
+            fig, ax = plt.subplots(figsize=(6, 6))
+            cax = ax.imshow(mean_heatmap, cmap='viridis', interpolation='nearest')
+            # fig.colorbar(cax, ax=ax, shrink=0.8, label='Intensity')
+            ax.set_title(f'Heatmap for Room {room_id}')
+            # ax.set_xlabel('')
+            # ax.set_ylabel('')
 
+            # summary_writer.add_image(f"heatmaps/room_{room_id}", mean_heatmap[np.newaxis, :], env_steps)
+            summary_writer.add_image(f"heatmaps/room_{room_id}", fig, env_steps)
+            plt.close(fig)
+
+            log.debug(f"Saved a heatmap")
+            # saved=True
+
+        target_objective_stat = "montezuma_heatmaps_{room_id}"
+
+        if target_objective_stat not in policy_avg_stats:
+            policy_avg_stats[target_objective_stat] = [deque(maxlen=1) for _ in range(cfg.num_policies)]
+        policy_avg_stats[target_objective_stat][policy_id].append(mean_heatmap)
