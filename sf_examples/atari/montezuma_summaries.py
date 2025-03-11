@@ -4,6 +4,7 @@ from sample_factory.utils.typing import PolicyID
 from sample_factory.utils.utils import log, static_vars
 
 from typing import Dict, Optional
+import cv2
 
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -31,11 +32,9 @@ def montezuma_extra_episodic_stats_processing(runner: Runner, msg: Dict, policy_
     stackplot = montezuma_extra_episodic_stats_processing.stackplot
     
     if policy_id not in heatmaps:
-        log.debug(f"policy_id not in heatmaps, setting dict()")
         heatmaps[policy_id] = dict()
 
     if policy_id not in stackplot:
-        log.debug(f"policy_id not in stachplot, setting []")
         stackplot[policy_id] = []
     
     for stat_key, stat_value in episode_stats.items():
@@ -46,44 +45,54 @@ def montezuma_extra_episodic_stats_processing(runner: Runner, msg: Dict, policy_
                 heatmaps[policy_id][room_id] = []
 
             heatmaps[policy_id][room_id].append(stat_value)
-            # log.debug(f"Found a heatmap: {stat_value.mean()}, now len is {len(heatmaps[policy_id][room_id])}")
 
         elif "visitation_frequency" == stat_key:
             stackplot[policy_id].append(stat_value)
 
-# @static_vars(saved=False)
 def montezuma_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: int, summary_writer: SummaryWriter) -> None:
     heatmaps = montezuma_extra_episodic_stats_processing.heatmaps
     cfg = runner.cfg
     # saved = montezuma_extra_summaries.saved
 
     if policy_id not in heatmaps:
-        log.debug(f"[EX] Policy id not in heatmaps, returning")
         return
 
     log.debug(f"Hello from the heatmap saver! Env_steps is {env_steps}")
     
     policy_avg_stats = runner.policy_avg_stats
+
+    # we can access Learners like this
+    # learner = runner.learners[policy_id].learner
     
     for room_id in heatmaps[policy_id].keys():
         mean_heatmap = np.mean(heatmaps[policy_id][room_id], axis=0)
 
-        if env_steps > 10_000_000:
+        if env_steps > 100_000:
             log.debug(f"Watch out, saving!!")
 
             fig, ax = plt.subplots(figsize=(6, 6))
             cax = ax.imshow(mean_heatmap, cmap='viridis', interpolation='nearest')
-            # fig.colorbar(cax, ax=ax, shrink=0.8, label='Intensity')
             ax.set_title(f'Heatmap for Room {room_id}')
-            # ax.set_xlabel('')
-            # ax.set_ylabel('')
 
+            try:
+                # we need to save normalized heatmaps, they look much better!
+                normalized_heatmap = mean_heatmap.astype(np.float32)
+                normalized_heatmap = (normalized_heatmap - normalized_heatmap.min()) / (np.ptp(normalized_heatmap) + 1e-8)
+                normalized_heatmap = np.uint8(255 * normalized_heatmap)
+
+                # Save the heatmap as a PNG file:
+                cv2.imwrite("/homeplaceholder/images/heatmap_{room_id}.png", normalized_heatmap)
+            except Exception as e:
+                log.debug(f"Error: {e}")
+
+            # this will log to wandb
             # summary_writer.add_image(f"heatmaps/room_{room_id}", mean_heatmap[np.newaxis, :], env_steps)
-            summary_writer.add_image(f"heatmaps/room_{room_id}", fig, env_steps)
+
+            # doesn't work for now -- adding fig with writer not implemented
+            # summary_writer.add_image(f"heatmaps/room_{room_id}", fig, env_steps)
             plt.close(fig)
 
             log.debug(f"Saved a heatmap")
-            # saved=True
 
         target_objective_stat = "montezuma_heatmaps_{room_id}"
 
