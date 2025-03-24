@@ -1,0 +1,89 @@
+Bootstrap: docker
+# From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
+# From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+From: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0
+# From: rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.2.1
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+
+%setup
+    mkdir -p ${SINGULARITY_ROOTFS}/dungeons
+    # cp -r . ${SINGULARITY_ROOTFS}/dungeons
+    # when using --sandbox mode there is a problem with copying the entire directory 
+    # When Singularity tries to copy the directory into the sandbox, 
+    # it is actually copying the sandbox into itself, which is not allowed.
+    rsync -av --exclude=".singularity" . ${SINGULARITY_ROOTFS}/dungeons
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update && apt-get install -yq \
+        build-essential \
+        cmake \
+        curl \
+        git \
+        ninja-build \
+        wget \
+        make
+
+    # nle dependencies
+    apt-get install -yq autoconf libtool pkg-config libbz2-dev
+
+    mkdir conda_setup
+    cd conda_setup
+    curl -o miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+        chmod +x miniconda.sh && \
+        ./miniconda.sh -b -p /opt/conda -u && \
+        /opt/conda/bin/conda install -y python=3.10 && \
+        /opt/conda/bin/conda clean -ya
+
+%environment
+    export PATH="/opt/conda/bin:$PATH"
+
+%post 
+    export PATH="/opt/conda/bin:$PATH"
+
+    python -m pip install --upgrade pip
+    pip install --upgrade setuptools
+
+    conda update -n base -c defaults conda
+    conda install -yq cmake flex bison lit
+    conda install -yq pybind11 -c conda-forge
+    pip install torch==2.2.1
+
+    # install render_utils
+    cd /dungeons/
+    pybind11_INCLUDE_DIR=/opt/conda/share/cmake/pybind11
+    cd sf_examples/nethack/render_utils
+    pip install -e .
+    cd ../../..
+
+    # install nle
+    git clone https://github.com/BartekCupial/nle.git nle && cd nle \
+    && git checkout v0.9.0 && git submodule init && git submodule update --recursive \
+    && sed '/#define NLE_ALLOW_SEEDING 1/i#define NLE_ALLOW_SEEDING 1' include/nleobs.h -i \
+    && sed '/self\.nethack\.set_initial_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.set_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/self\.nethack\.get_current_seeds = f/d' nle/env/tasks.py -i \
+    && sed '/def seed(self, core=None, disp=None, reseed=True):/d' nle/env/tasks.py -i \
+    && sed '/raise RuntimeError("NetHackChallenge doesn.t allow seed changes")/d' nle/env/tasks.py -i \
+    && python setup.py install && cd .. 
+    
+    # install sample factory
+    pip install .[dev,nethack,mrunner]
+    pip install loralib
+
+    # Test NLE.
+    python -c 'import nle; import sf_examples.nethack.algo.learning.learner'
+
+    chmod a+rw -R /opt/conda/bin/python
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    conda clean --all
+    conda info
+
+%runscript
+    exec "$@"
