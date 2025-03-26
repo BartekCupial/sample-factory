@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 300_000_000,
+    "train_for_env_steps": 500_000_000,
     "num_workers": 4,
     "num_envs_per_worker": 8,
     "num_batches_per_epoch": 16,
@@ -15,21 +15,21 @@ config = {
     "save_milestones_ith": 10_000_000,
     # Wandb settings
     "wandb_user": "ideas-ncbr",
-    "wandb_project": "atari",
-    "wandb_group": "run other envs",
+    "wandb_project": "atari plasticity_ed",
     "wandb_tags": [name],
     "with_wandb": True,
 }
 
 # atari_games = ["montezuma"]
-atari_games = ["phoenix", "namethisgame", "choppercommand", "mspacman", "pong", "upndown", "beam_rider", "qbert"]
+atari_games = ["phoenix", "namethisgame", "choppercommand", "mspacman", "pong", "upndown", "beam_rider"]
 
 params_grid = []
 
 for atari_game in atari_games:
     params_grid += [
         {
-            "seed": list(range(1)),
+            "seed": list(range(10)),
+            "wandb_group": [f"plasticity {atari_game}, 10 seeds"],
 
             # Check async
             "async_rl": [True],
@@ -40,7 +40,7 @@ for atari_game in atari_games:
             "env_frameskip": [3],
 
             # paper's params: model
-            "actor_critic_share_weights": [True, False],
+            "actor_critic_share_weights": [True], #False
             "encoder_conv_mlp_layers": [[512]],
             "nonlinearity": ["relu"],
 
@@ -55,7 +55,7 @@ for atari_game in atari_games:
             "value_loss_coeff": [0.5],
             "max_grad_norm": [0.5],
             "optimizer": ["adam"],
-            "num_epochs": [1, 4, 8],
+            "num_epochs": [1, 8],
             "normalize_returns": [True],
             "repeat_action_probability": [0.25],
 
