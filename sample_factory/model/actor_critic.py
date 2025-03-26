@@ -18,6 +18,7 @@ from sample_factory.model.model_utils import model_device
 from sample_factory.utils.normalize import ObservationNormalizer
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 
+import copy
 
 class ActorCritic(nn.Module, Configurable):
     def __init__(self, obs_space: ObsSpace, action_space: ActionSpace, cfg: Config):
@@ -93,6 +94,8 @@ class ActorCritic(nn.Module, Configurable):
         elif self.cfg.policy_initialization == "torch_default":
             # do nothing
             pass
+
+        self.initial_state = self.state_dict()  # Save initial state for L2 init loss
 
     def normalize_obs(self, obs: Dict[str, Tensor]) -> Dict[str, Tensor]:
         return self.obs_normalizer(obs)

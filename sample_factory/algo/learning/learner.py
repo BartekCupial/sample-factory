@@ -889,6 +889,7 @@ class Learner(Configurable):
         
         stats.dead_neurons = var.dead_neurons
         stats.effective_rank = var.effective_rank
+        stats.l2_init_loss = var.l2_init_loss
 
         if self.train_step % 200 == 0:
             stats.per_layer_grad_norms = var.per_layer_grad_norms
