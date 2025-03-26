@@ -62,6 +62,10 @@ def init_wandb(cfg):
     wandb.define_metric("policy_stats/*", step_metric="train/env_steps")
     wandb.define_metric("reward/*", step_metric="train/env_steps")
     wandb.define_metric("stats/*", step_metric="train/env_steps")
+    wandb.define_metric("dead_neurons/*", step_metric="train/env_steps")
+    wandb.define_metric("effective_rank/*", step_metric="train/env_steps")
+    wandb.define_metric("per_layer_grad_norms/*", step_metric="train/env_steps")
+    wandb.define_metric("per_layer_param_norms/*", step_metric="train/env_steps")
 
 
 def finish_wandb(cfg):

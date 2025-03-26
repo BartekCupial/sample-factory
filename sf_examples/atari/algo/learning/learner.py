@@ -34,7 +34,6 @@ from sf_examples.atari.models.utils import freeze_selected, unfreeze_selected
 # from sf_examples.nethack.datasets.roles import Alignment, Race, Role
 # from sf_examples.nethack.models.utils import freeze_selected, unfreeze_selected
 
-
 class MultiFileDataset(torch.utils.data.Dataset):
     def __init__(self, hdf5_files):
         import h5py  # import here to avoid import errors when MultiFileDataset is not needed/used
@@ -242,6 +241,9 @@ class DatasetLearner(Learner):
         return kickstarting_loss
 
     def _compute_model_outputs(self, mb: TensorDict, num_invalids: int):
+        x_pred = None
+        x_target = None
+
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
             valids = mb.valids
@@ -293,7 +295,15 @@ class DatasetLearner(Learner):
 
             values = result["values"].squeeze()
 
+            if self.cfg.with_rnd:
+                int_values = result["int_values"].squeeze()
+            else:
+                int_values = 0
+
             del core_outputs
+
+        if self.cfg.with_rnd:
+            x_pred = self.actor_critic.predictor_network(mb.normalized_obs_int)
 
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
@@ -336,10 +346,21 @@ class DatasetLearner(Learner):
 
                 targets = vs.to(self.device)
                 adv = adv.to(self.device)
+                int_targets = None
+            elif self.cfg.with_rnd:
+                adv = self.cfg.int_coeff * mb.int_advantages + self.cfg.ext_coeff * mb.advantages
+
+                # cleanrl normalizes advantages
+                adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+                
+                targets = mb.returns
+                int_targets = mb.int_returns
+                x_target = self.actor_critic.target_network(mb.normalized_obs_int)
             else:
                 # using regular GAE
                 adv = mb.advantages
                 targets = mb.returns
+                int_targets = None
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
@@ -351,8 +372,12 @@ class DatasetLearner(Learner):
             adv_std=adv_std,
             adv_mean=adv_mean,
             values=values,
+            int_values=int_values,
             targets=targets,
+            int_targets=int_targets,
             valids=valids,
+            x_pred=x_pred,
+            x_target=x_target,
         )
 
     def _calculate_neuron_score_all_layers(self, activations):
@@ -373,34 +398,140 @@ class DatasetLearner(Learner):
                 all_layers_score[layer_name] = neuron_scores
         return all_layers_score
 
+    # def _dead_neurons(self, tau):
+    #     dead_neurons = {}
+
+    #     if self.cfg.actor_critic_share_weights:
+    #         activations = {
+    #                         "encoder": self.actor_critic.encoder.activations, 
+    #                         "decoder": self.actor_critic.decoder.activations,
+    #                       }
+    #         # for dormant ratio
+    #         n_dead = 0
+    #         n_total = 0
+
+    #         for module_name, activations_dict in activations.items():
+    #             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+    #             for layer_name, layer_scores in all_layers_scores.items():
+    #                 num_neurons = layer_scores.shape[0]
+    #                 num_dead_neurons = (layer_scores <= tau).sum().item()
+
+    #                 dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+    #                 dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+
+    #                 n_dead += num_dead_neurons
+    #                 n_total += num_neurons
+
+    #         dead_neurons["dormant_ratio"] = n_dead/n_total
+
+    #     else:
+    #         activations = {
+    #                         "actor_encoder": self.actor_critic.actor_encoder.activations,
+    #                         "actor_decoder": self.actor_critic.actor_decoder.activations,
+    #                         "critic_encoder": self.actor_critic.critic_encoder.activations,
+    #                         "critic_decoder": self.actor_critic.critic_decoder.activations,
+    #                       }
+
+    #         # for dormant ratio
+    #         n_dead_actor = 0
+    #         n_dead_critic = 0
+    #         n_total_actor = 0
+    #         n_total_critic = 0
+
+    #         for module_name, activations_dict in activations.items():
+    #             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+    #             for layer_name, layer_scores in all_layers_scores.items():
+    #                 num_neurons = layer_scores.shape[0]
+    #                 num_dead_neurons = (layer_scores <= tau).sum().item()
+
+    #                 dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+    #                 dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+
+    #                 if "actor" in module_name:
+    #                     n_dead_actor += num_dead_neurons
+    #                     n_total_actor += num_neurons
+    #                 if "critic" in module_name:
+    #                     n_dead_critic += num_dead_neurons
+    #                     n_total_critic += num_neurons
+
+
+    #         dead_neurons["dormant_ratio_actor"] = n_dead_actor/n_total_actor
+    #         dead_neurons["dormant_ratio_critic"] = n_dead_critic/n_total_critic
+    #         dead_neurons["dormant_ratio"] = (n_dead_actor + n_dead_critic)/(n_total_actor + n_total_critic)
+
+    #     self.curr_dormant_ratio = dead_neurons["dormant_ratio"]
+
+    #     return dead_neurons
+
+    def _dead_neurons_one_module(self, activations_dict, module_name, tau):
+        dead_neurons = {}
+
+        n_dead = 0
+        n_total = 0
+
+        all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
+        for layer_name, layer_scores in all_layers_scores.items():
+            num_neurons = layer_scores.shape[0]
+            num_dead_neurons = (layer_scores <= tau).sum().item()
+
+            dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
+            dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
+
+            n_dead += num_dead_neurons
+            n_total += num_neurons
+
+        return dead_neurons, n_dead, n_total
+
     def _dead_neurons(self, tau):
+        dead_neurons = {}
+
         if self.cfg.actor_critic_share_weights:
             activations = {
                             "encoder": self.actor_critic.encoder.activations, 
                             "decoder": self.actor_critic.decoder.activations,
                           }
+            # for dormant ratio
+            n_dead = 0
+            n_total = 0
+
+            for module_name, activations_dict in activations.items():
+                dead_neurons_one, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
+                dead_neurons.update(dead_neurons_one)
+                n_dead += n_dead_module
+                n_total += n_total_module
+
+            dead_neurons["dormant_ratio"] = n_dead/n_total
         else:
             activations = {
                             "actor_encoder": self.actor_critic.actor_encoder.activations,
                             "actor_decoder": self.actor_critic.actor_decoder.activations,
-                            "critic_decoder": self.actor_critic.critic_encoder.activations,
+                            "critic_encoder": self.actor_critic.critic_encoder.activations,
                             "critic_decoder": self.actor_critic.critic_decoder.activations,
                           }
 
-        neurons_dict = {}  
-        dead_neurons = {}
-        
-        for module_name, activations_dict in activations.items():
-            all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
-            for layer_name, layer_scores in all_layers_scores.items():
-                num_neurons = layer_scores.shape[0]
-                num_dead_neurons = (layer_scores <= tau).sum().item()
+            # for dormant ratio
+            n_dead_actor = 0
+            n_dead_critic = 0
+            n_total_actor = 0
+            n_total_critic = 0
 
-                neurons_dict[module_name + '__' + layer_name] = num_neurons
-                dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
-                dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-                log.debug(f"{module_name}/{layer_name}: {num_dead_neurons}/{num_neurons}")
-        return dead_neurons
+            for module_name, activations_dict in activations.items():
+                dead_neurons, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
+                dead_neurons.update(dead_neurons_one)
+                if "actor" in module_name:
+                    n_dead_actor += n_dead_module
+                    n_total_actor += n_total_module
+                if "critic" in module_name:
+                    n_dead_critic += n_dead_module
+                    n_total_critic += n_total_module
+
+            dead_neurons["dormant_ratio_actor"] = n_dead_actor/n_total_actor
+            dead_neurons["dormant_ratio_critic"] = n_dead_critic/n_total_critic
+            dead_neurons["dormant_ratio"] = (n_dead_actor + n_dead_critic)/(n_total_actor + n_total_critic)
+
+        self.curr_dormant_ratio = dead_neurons["dormant_ratio"]
+
+        return dead_neurons        
 
     def _grad_and_param_norms(self):
         per_layer_grad_norms = {
@@ -416,7 +547,73 @@ class DatasetLearner(Learner):
 
         return per_layer_grad_norms, per_layer_param_norms
 
-    # as for now, works only for ActorCriticSharedWeights
+    # def _effective_rank(self, srank_threshold, compute_for="actor"):
+            
+    #         if self.cfg.actor_critic_share_weights:
+    #             decoder = self.actor_critic.decoder
+    #             encoder = self.actor_critic.encoder
+    #         else:
+    #             if compute_for == "actor":
+    #                 decoder = self.actor_critic.actor_decoder
+    #                 encoder = self.actor_critic.actor_encoder
+    #             elif compute_for == "critic":
+    #                 decoder = self.actor_critic.critic_decoder
+    #                 encoder = self.actor_critic.critic_encoder
+    #             else:
+    #                 raise ValueError("The value of compute_for must be either 'actor' or 'critic") 
+
+    #         if decoder.last_linear_layer is not None:
+    #             last_layer = decoder.last_linear_layer
+    #             features = decoder.activations["decoder_" + last_layer]
+    #         elif encoder.last_linear_layer is not None:
+    #             last_layer = encoder.last_linear_layer
+    #             features = encoder.activations["encoder_mlp_" + last_layer]
+    #         else:
+    #             raise ValueError("Both Encoder and Decoder lack linear layers!") 
+
+    #         U, S, V = torch.linalg.svd(features)
+
+    #         # Effective feature rank is the number of normalized singular values
+    #         # such that their cumulative sum is greater than some epsilon.
+    #         assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
+    #         s_sum = torch.sum(S)
+
+    #         # Catch case where the regularizer has collapsed the network features
+    #         # This makes the training not crash entirely when rank collapse occurs
+    #         if np.isclose(s_sum.item(), 0.0):
+    #             # Break tie through random selection of two singular values
+    #             indices = torch.randperm(len(S))[:2]
+    #             s_min, s_max = S[indices]
+    #             return torch.zeros(1), s_min, s_max
+    #         else:
+    #             S_normalized = S / s_sum
+    #             S_cum = torch.cumsum(S_normalized, dim=-1)
+    #             # Get the first index where the rank threshold is exceeded
+    #             k = (S_cum > srank_threshold).nonzero()[0]
+    #             return k, S.min(), S.max()
+
+    def _calculate_effective_rank(self, features, srank_threshold):
+            U, S, V = torch.linalg.svd(features)
+
+            # Effective feature rank is the number of normalized singular values
+            # such that their cumulative sum is greater than some epsilon.
+            assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
+            s_sum = torch.sum(S)
+
+            # Catch case where the regularizer has collapsed the network features
+            # This makes the training not crash entirely when rank collapse occurs
+            if np.isclose(s_sum.item(), 0.0):
+                # Break tie through random selection of two singular values
+                indices = torch.randperm(len(S))[:2]
+                s_min, s_max = S[indices]
+                return torch.zeros(1), s_min, s_max
+            else:
+                S_normalized = S / s_sum
+                S_cum = torch.cumsum(S_normalized, dim=-1)
+                # Get the first index where the rank threshold is exceeded
+                k = (S_cum > srank_threshold).nonzero()[0]
+                return k, S.min(), S.max()
+
     def _effective_rank(self, srank_threshold, compute_for="actor"):
             
             if self.cfg.actor_critic_share_weights:
@@ -441,26 +638,7 @@ class DatasetLearner(Learner):
             else:
                 raise ValueError("Both Encoder and Decoder lack linear layers!") 
 
-            U, S, V = torch.linalg.svd(features)
-
-            # Effective feature rank is the number of normalized singular values
-            # such that their cumulative sum is greater than some epsilon.
-            assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
-            s_sum = torch.sum(S)
-
-            # Catch case where the regularizer has collapsed the network features
-            # This makes the training not crash entirely when rank collapse occurs
-            if np.isclose(s_sum.item(), 0.0):
-                # Break tie through random selection of two singular values
-                indices = torch.randperm(len(S))[:2]
-                s_min, s_max = S[indices]
-                return torch.zeros(1), s_min, s_max
-            else:
-                S_normalized = S / s_sum
-                S_cum = torch.cumsum(S_normalized, dim=-1)
-                # Get the first index where the rank threshold is exceeded
-                k = (S_cum > srank_threshold).nonzero()[0]
-                return k, S.min(), S.max()
+            return self._calculate_effective_rank(features, srank_threshold)
 
     def _calculate_losses(
         self,
@@ -495,6 +673,30 @@ class DatasetLearner(Learner):
                 )
                 old_values = mb["values"]
                 value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+
+                if self.cfg.with_rnd:
+                    int_values = mb_results["int_values"]
+                    old_int_values = mb["int_values"]
+                    int_targets = mb_results["int_targets"]
+                    x_pred = mb_results["x_pred"]
+                    x_target = mb_results["x_target"]
+                    
+                    # Value loss for int_critic - just MSE, no PPO clipping
+                    int_value_loss = self._value_loss(int_values, old_int_values, int_targets, 0.0, valids, num_invalids)
+
+                    # Predictor loss - MSE loss between (frozen) target & predictor networks
+                    predictor_loss = F.mse_loss(x_pred, x_target.detach(), reduction="none").mean(-1)
+
+                    # Paper: for the predictor network we randomly drop out elements of the batch with keep probability 0:25
+                    mask = torch.rand(len(predictor_loss), device=x_target.device) < self.cfg.keep_prob
+                    mask = mask.float()  
+                    predictor_loss = (predictor_loss * mask).sum() / torch.max(mask.sum(), torch.tensor(1.0, device=x_target.device))
+
+                    # mask = torch.rand(mb.x_target.shape[0], device=mb.x_target.device) > self.cfg.keep_prob
+                    # predictor_loss = F.mse_loss(mb.x_pred[mask], mb.x_target[mask].detach())
+                else:
+                    int_value_loss = 0
+                    predictor_loss = 0
 
             with self.timing.add_time("kickstarting_loss"):
                 kickstarting_loss = self.kickstarting_loss_func(
@@ -566,6 +768,17 @@ class DatasetLearner(Learner):
             actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
             critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
             effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
+
+        if self.cfg.with_rnd:
+            activations_dict = self.actor_critic.predictor_activations
+            dead_neurons_predictor, n_dead_predictor, n_total_predictor = self._dead_neurons_one_module(activations_dict, "", self.cfg.tau)
+            dead_neurons_predictor["dormant_ratio_predictor"] = n_dead_predictor/n_total_predictor
+            dead_neurons.update(dead_neurons_predictor)
+            predictor_last_linear_layer = self.actor_critic.predictor_last_linear_layer
+            features_predictor = activations_dict["predictor_mlp_" + predictor_last_linear_layer]
+            rank_predictor, _, _ = self._calculate_effective_rank(features_predictor, self.cfg.delta)
+            effective_rank["effective_rank_predictor"] = rank_predictor
+
             
         per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
 
@@ -584,6 +797,8 @@ class DatasetLearner(Learner):
             per_layer_param_norms,
             regularizer_loss,
             regularizer_loss_summaries,
+            predictor_loss,
+            int_value_loss,
         )
 
     def _train(
@@ -626,6 +841,7 @@ class DatasetLearner(Learner):
 
             assert self.actor_critic.training
 
+
             with timing.add_time("freeze_model"):
                 if isinstance(self.actor_critic, KickStarter):
                     freeze_selected(self.env_steps, self.cfg, self.actor_critic.student, self.models_frozen)
@@ -656,6 +872,11 @@ class DatasetLearner(Learner):
                     # enable syntactic sugar that allows us to access dict's keys as object attributes
                     mb = AttrDict(mb)
 
+                    # wandb logging for int_rewards and curiosity_rewards - we need it in **locals() 
+                    if self.cfg.with_rnd:
+                        int_rewards = mb.int_rewards
+                        curiosity_rewards = mb.curiosity_rewards
+
                 with timing.add_time("calculate_losses"):
                     (
                         action_distribution,
@@ -671,13 +892,16 @@ class DatasetLearner(Learner):
                         per_layer_param_norms,
                         regularizer_loss,
                         regularizer_loss_summaries,
+                        predictor_loss,
+                        int_value_loss,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
-                    critic_loss = value_loss
-                    loss: Tensor = actor_loss + critic_loss + regularizer_loss
+                    critic_loss = value_loss + int_value_loss
+
+                    loss: Tensor = actor_loss + critic_loss + regularizer_loss + predictor_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -797,14 +1021,7 @@ class DatasetLearner(Learner):
                     synchronize(self.cfg, self.device)
                     # this will force policy update on the inference worker (policy worker)
                     self.policy_versions_tensor[self.policy_id] = self.train_step
-            
-                # snapshot = tracemalloc.take_snapshot()
-                # top_stats = snapshot.statistics('lineno')
 
-                # log.debug("[Top 10 memory-consuming lines]")
-                # for stat in top_stats[:10]:
-                #     log.debug(stat)
-                
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():
                 self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
