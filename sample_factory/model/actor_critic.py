@@ -332,6 +332,8 @@ class ActorCriticSharedWeights(ActorCritic):
                 return layer
 
             # Prediction network
+            self.predictor_activations = {}
+            self.predictor_last_linear_layer = None
             self.predictor_network = nn.Sequential(
                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
                 nn.LeakyReLU(),
@@ -346,6 +348,8 @@ class ActorCriticSharedWeights(ActorCritic):
                 nn.ReLU(),
                 layer_init(nn.Linear(512, 512)),
             )
+
+            self.register_hooks()
 
             # Target network
             self.target_network = nn.Sequential(
@@ -385,6 +389,22 @@ class ActorCriticSharedWeights(ActorCritic):
         n_params = sum(p.numel() for p in self.parameters())
 
         return n_params
+
+    def register_hooks(self):
+        for name, layer in self.predictor_network.named_modules():
+            if isinstance(layer, nn.Linear):
+                self.predictor_last_linear_layer = name
+                layer.register_forward_hook(self.save_activations_hook(name, True))
+            elif isinstance(layer, nn.Conv2d):
+                layer.register_forward_hook(self.save_activations_hook(name, False))
+
+    def save_activations_hook(self, layer_name, is_linear):
+        def hook(module, input, output):
+            if is_linear:
+                self.predictor_activations["predictor_mlp_" + layer_name] = output
+            else:
+                self.predictor_activations["predictor_conv_" + layer_name] = output
+        return hook
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
