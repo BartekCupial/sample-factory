@@ -10,6 +10,7 @@ from sample_factory.envs.env_wrappers import (
     NoopResetEnv,
     NumpyObsWrapper,
     StickyActionEnv,
+    MontezumaRoomCountWrapper,
 )
 
 ATARI_W = ATARI_H = 84
@@ -115,4 +116,7 @@ def make_atari_env(env_name, cfg, env_config, render_mode: Optional[str] = None)
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, cfg.env_framestack)
     env = NumpyObsWrapper(env)
+
+    if cfg.count_montezuma_rooms:
+        env = MontezumaRoomCountWrapper(env)
     return env

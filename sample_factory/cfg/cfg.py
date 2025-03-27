@@ -283,6 +283,15 @@ def add_rl_args(p: ArgumentParser):
         help="c_hat clipping parameter of the V-trace algorithm. Low values for c_hat can reduce variance of the advantage estimates (similar to GAE lambda < 1)",
     )
 
+
+    # plasticity
+    p.add_argument("--tau", type=float, default=0.1, help="Threshold for dead/dormant neurons")  # Default: as in the paper
+    p.add_argument("--delta", type=float, default=0.99, help="Threshold for effective rank")  # Default: as in the paper
+    p.add_argument("--l2_init_loss_coeff", default=0.0, type=float, help="Coefficient for the l2_init loss")  # Default: don't use
+    p.add_argument("--dr_threshold", default=1.0, type=float, help="Dormant Ratio threshold for Shrink&Perturb")  # Default: don't use
+    p.add_argument("--shrink", default=0.5, type=float, help="Shrinking coefficient for Shrink&Perturb")  # Default: as in the paper
+    p.add_argument("--perturb", default=0.5, type=float, help="Perturbation coefficient for Shrink&Perturb")  # Default: as in the paper
+
     # optimization
     p.add_argument(
         "--optimizer",
