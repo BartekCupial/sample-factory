@@ -889,6 +889,7 @@ class Learner(Configurable):
         
         stats.dead_neurons = var.dead_neurons
         stats.effective_rank = var.effective_rank
+        stats.l2_init_loss = var.l2_init_loss
         if self.cfg.with_rnd:
             stats.int_rewards = var.int_rewards.mean()
             stats.curiosity_rewards = var.curiosity_rewards.mean()
@@ -988,34 +989,6 @@ class Learner(Configurable):
         for key, x in normalized_obs.items():
             normalized_obs[key] = x.view(og_shape[key])
 
-        return normalized_obs
-
-    def _prepare_and_normalize_obs_int(self, obs: TensorDict) -> TensorDict:
-        normalized_obs = {}
-        
-        # Assuming you want to normalize a specific channel or transform multi-channel obs
-        for key, x in obs.items():
-            # If x is 4D tensor [batch, time, channels, height, width]
-            if len(x.shape) == 5:
-                # Select specific channel or process as needed
-                x_for_norm = x[:, :, 3, :, :].reshape(-1, 1, 84, 84)
-            else:
-                x_for_norm = x
-            
-            # Create normalizer on device
-            mean = torch.from_numpy(self.actor_critic.obs_normalizer.running_mean).to(x.device).float()
-            var = torch.from_numpy(self.actor_critic.obs_normalizer.running_var).to(x.device).float()
-            
-            # Normalize and clip
-            normalized_x = (
-                (x_for_norm - mean) 
-                / torch.sqrt(var + 1e-8)
-            ).clip(-5, 5).float()
-            
-            # Restore original shape
-            normalized_x = normalized_x.view(x.shape)
-            normalized_obs[key] = normalized_x
-        
         return normalized_obs
 
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:

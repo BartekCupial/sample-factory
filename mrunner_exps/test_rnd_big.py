@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 500_000,
+    "train_for_env_steps": 500_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,
@@ -17,11 +17,11 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "test plasticity log",
+    "wandb_group": "test heatmaps big",
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
+    "with_wandb": True,
     "serial_mode": False,
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
@@ -47,12 +47,17 @@ for atari_game in atari_games:
                 "gamma": [0.999],  # extrinsic gamma
                 "num_epochs": [4],
                 "repeat_action_probability": [0.25],
+                "lr_schedule": ["linear_decay"],  # like in CleanRL
+                "lr_adaptive_min": [ 
+                                    0.00005,
+                                    ],
+                "adam_eps": [1e-5],  # like in CleanRL
+                "skip_train": [6400],                
                 "use_shrink_perturb": [False],
-                "freq_shrink_perturb": [100_000_000],
                 "l2_init_loss_coeff": [0.01],
                 "log_heatmaps_to_wandb": [True],
                 "save_heatmaps_locally": [True],
-                "heatmap_save_freq": [100_000],
+                "heatmap_save_freq": [5_000_000],
             },
         ]
 

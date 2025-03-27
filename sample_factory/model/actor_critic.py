@@ -21,6 +21,7 @@ from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log
 
 from gymnasium.wrappers.normalize import RunningMeanStd
+import copy
 
 
 class RewardForwardFilter:
@@ -119,6 +120,8 @@ class ActorCritic(nn.Module, Configurable):
             # do nothing
             pass
 
+        self.initial_state = self.state_dict()  # Save initial state for L2 init loss
+
     def normalize_obs(self, obs: Dict[str, Tensor]) -> Dict[str, Tensor]:
         return self.obs_normalizer(obs)
 
@@ -153,138 +156,6 @@ class ActorCritic(nn.Module, Configurable):
         raise NotImplementedError()
 
 
-# class ActorCriticSharedWeights(ActorCritic):
-#     def __init__(
-#         self,
-#         model_factory,
-#         obs_space: ObsSpace,
-#         action_space: ActionSpace,
-#         cfg: Config,
-#     ):
-#         super().__init__(obs_space, action_space, cfg)
-
-#         # in case of shared weights we're using only a single encoder and a single core
-#         self.encoder = model_factory.make_model_encoder_func(cfg, obs_space)
-#         self.encoders = [self.encoder]  # a single shared encoder
-
-#         self.core = model_factory.make_model_core_func(cfg, self.encoder.get_out_size())
-#         self.cores = [self.core]
-
-#         self.decoder = model_factory.make_model_decoder_func(cfg, self.core.get_out_size())
-#         self.decoders = [self.decoder]
-
-#         decoder_out_size: int = self.decoder.get_out_size()
-
-#         self.critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
-#         self.action_parameterization = self.get_action_parameterization(decoder_out_size)
-
-#         self.with_rnd = cfg.with_rnd
-#         self.apply(self.initialize_weights)
-
-#         # RND Networks
-#         if self.with_rnd:
-#             # TODO: should these use encoder architcture?
-#             # self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
-#             # self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
-
-#             # Copied from: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_rnd_envpool.py
-#             def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-#                 torch.nn.init.orthogonal_(layer.weight, std)
-#                 torch.nn.init.constant_(layer.bias, bias_const)
-#                 return layer
-
-#             # Prediction network
-#             self.predictor_network = nn.Sequential(
-#                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
-#                 nn.LeakyReLU(),
-#                 layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
-#                 nn.LeakyReLU(),
-#                 layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
-#                 nn.LeakyReLU(),
-#                 nn.Flatten(),
-#                 layer_init(nn.Linear(7 * 7 * 64, 512)),
-#                 nn.ReLU(),
-#                 layer_init(nn.Linear(512, 512)),
-#                 nn.ReLU(),
-#                 layer_init(nn.Linear(512, 512)),
-#             )
-
-#             # Target network
-#             self.target_network = nn.Sequential(
-#                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
-#                 nn.LeakyReLU(),
-#                 layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
-#                 nn.LeakyReLU(),
-#                 layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
-#                 nn.LeakyReLU(),
-#                 nn.Flatten(),
-#                 layer_init(nn.Linear(7 * 7 * 64, 512)),
-#             )
-
-#             # Critic that estimates intrisic rewards
-#             self.int_critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
-
-#             # Freeze target network
-#             for param in self.target_network.parameters():
-#                 param.requires_grad = False
-
-#         self.n_params = self.get_n_params()
-
-#     def get_n_params(self):
-#         self.n_params_encoders = 0
-#         self.n_params_cores = 0
-#         self.n_params_decoders = 0
-
-#         for encoder in self.encoders:
-#             self.n_params_encoders += sum(p.numel() for p in encoder.parameters())
-
-#         for core in self.cores:
-#             self.n_params_cores += sum(p.numel() for p in core.parameters())
-
-#         for decoder in self.decoders:
-#             self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
-
-#         n_params = sum(p.numel() for p in self.parameters())
-
-#         return n_params
-
-#     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
-#         x = self.encoder(normalized_obs_dict)
-#         return x
-
-#     def forward_core(self, head_output: Tensor, rnn_states):
-#         x, new_rnn_states = self.core(head_output, rnn_states)
-#         return x, new_rnn_states
-
-#     def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-#         decoder_output = self.decoder(core_output)
-#         values = self.critic(decoder_output).squeeze()
-
-#         result = TensorDict(values=values)
-
-#         if self.with_rnd:
-#             int_values = self.int_critic(decoder_output).squeeze()
-#             result["int_values"] = int_values
-
-#         if values_only:
-#             return result
-
-#         action_distribution_params, self.last_action_distribution = self.action_parameterization(decoder_output)
-
-#         # `action_logits` is not the best name here, better would be "action distribution parameters"
-#         result["action_logits"] = action_distribution_params
-
-#         self._maybe_sample_actions(sample_actions, result)
-#         return result
-
-#     def forward(self, normalized_obs_dict, rnn_states, values_only=False) -> TensorDict:
-#         x = self.forward_head(normalized_obs_dict)
-#         x, new_rnn_states = self.forward_core(x, rnn_states)
-#         result = self.forward_tail(x, values_only, sample_actions=True)
-#         result["new_rnn_states"] = new_rnn_states
-#         return result
-
-# Temporary workaround: use the same networks as in CleanRL
 class ActorCriticSharedWeights(ActorCritic):
     def __init__(
         self,
@@ -293,6 +164,139 @@ class ActorCriticSharedWeights(ActorCritic):
         action_space: ActionSpace,
         cfg: Config,
     ):
+        super().__init__(obs_space, action_space, cfg)
+
+        # in case of shared weights we're using only a single encoder and a single core
+        self.encoder = model_factory.make_model_encoder_func(cfg, obs_space)
+        self.encoders = [self.encoder]  # a single shared encoder
+
+        self.core = model_factory.make_model_core_func(cfg, self.encoder.get_out_size())
+        self.cores = [self.core]
+
+        self.decoder = model_factory.make_model_decoder_func(cfg, self.core.get_out_size())
+        self.decoders = [self.decoder]
+
+        decoder_out_size: int = self.decoder.get_out_size()
+
+        self.critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
+        self.action_parameterization = self.get_action_parameterization(decoder_out_size)
+
+        self.with_rnd = cfg.with_rnd
+        self.apply(self.initialize_weights)
+
+        # RND Networks
+        if self.with_rnd:
+            # TODO: should these use encoder architcture?
+            # self.target_network = model_factory.make_model_encoder_func(cfg, obs_space)
+            # self.predictor_network = model_factory.make_model_encoder_func(cfg, obs_space)
+
+            # Copied from: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_rnd_envpool.py
+            def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+                torch.nn.init.orthogonal_(layer.weight, std)
+                torch.nn.init.constant_(layer.bias, bias_const)
+                return layer
+
+            # Prediction network
+            self.predictor_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 512)),
+            )
+
+            # Target network
+            self.target_network = nn.Sequential(
+                layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+                nn.LeakyReLU(),
+                layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+                nn.LeakyReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(7 * 7 * 64, 512)),
+            )
+
+            # Critic that estimates intrisic rewards
+            self.int_critic = model_factory.make_model_critic_func(cfg, self.decoder.get_out_size())
+
+            # Freeze target network
+            for param in self.target_network.parameters():
+                param.requires_grad = False
+
+        self.n_params = self.get_n_params()
+
+    def get_n_params(self):
+        self.n_params_encoders = 0
+        self.n_params_cores = 0
+        self.n_params_decoders = 0
+
+        for encoder in self.encoders:
+            self.n_params_encoders += sum(p.numel() for p in encoder.parameters())
+
+        for core in self.cores:
+            self.n_params_cores += sum(p.numel() for p in core.parameters())
+
+        for decoder in self.decoders:
+            self.n_params_decoders += sum(p.numel() for p in decoder.parameters())
+
+        n_params = sum(p.numel() for p in self.parameters())
+
+        return n_params
+
+    def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
+        x = self.encoder(normalized_obs_dict)
+        return x
+
+    def forward_core(self, head_output: Tensor, rnn_states):
+        x, new_rnn_states = self.core(head_output, rnn_states)
+        return x, new_rnn_states
+
+    def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
+        decoder_output = self.decoder(core_output)
+        values = self.critic(decoder_output).squeeze()
+
+        result = TensorDict(values=values)
+
+        if self.with_rnd:
+            int_values = self.int_critic(decoder_output).squeeze()
+            result["int_values"] = int_values
+
+        if values_only:
+            return result
+
+        action_distribution_params, self.last_action_distribution = self.action_parameterization(decoder_output)
+
+        # `action_logits` is not the best name here, better would be "action distribution parameters"
+        result["action_logits"] = action_distribution_params
+
+        self._maybe_sample_actions(sample_actions, result)
+        return result
+
+    def forward(self, normalized_obs_dict, rnn_states, values_only=False) -> TensorDict:
+        x = self.forward_head(normalized_obs_dict)
+        x, new_rnn_states = self.forward_core(x, rnn_states)
+        result = self.forward_tail(x, values_only, sample_actions=True)
+        result["new_rnn_states"] = new_rnn_states
+        return result
+
+# Use the same networks as in CleanRL's RND
+class CleanRLActorCritic(ActorCritic):
+    def __init__(
+        self,
+        model_factory,
+        obs_space: ObsSpace,
+        action_space: ActionSpace,
+        cfg: Config,
+    ):
+        cfg.encoder_conv_mlp_layers = [256, 448]
         super().__init__(obs_space, action_space, cfg)
 
         # in case of shared weights we're using only a single encoder and a single core
@@ -643,7 +647,9 @@ def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_spac
 
     model_factory = global_model_factory()
 
-    if cfg.actor_critic_share_weights:
+    if cfg.cleanrl_actor_critic:
+        return CleanRLActorCritic(model_factory, obs_space, action_space, cfg)
+    elif cfg.actor_critic_share_weights:
         return ActorCriticSharedWeights(model_factory, obs_space, action_space, cfg)
     else:
         return ActorCriticSeparateWeights(model_factory, obs_space, action_space, cfg)

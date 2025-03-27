@@ -2,13 +2,12 @@ from itertools import cycle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Tuple
 
-# import tracemalloc
 # import nle.dataset as nld
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-import tracemalloc
+import copy
 
 
 from sample_factory.algo.learning.learner import Learner
@@ -23,6 +22,7 @@ from sample_factory.algo.utils.tensor_dict import TensorDict, clone_tensordict, 
 from sample_factory.algo.utils.tensor_utils import ensure_torch_tensor
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.model.model_utils import get_rnn_size
+from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import log
@@ -380,6 +380,34 @@ class DatasetLearner(Learner):
             x_target=x_target,
         )
 
+    def _l2_init_loss(self):
+        curr_weights = self.actor_critic.named_parameters()
+        initial_state = self.actor_critic.initial_state
+
+        l2_init_loss = 0.0
+        for name, param in curr_weights:
+            if param.requires_grad and name in initial_state.keys():
+                initial_param = initial_state[name].to(self.device)
+                l2_init_loss += torch.norm(param - initial_param, p=2)
+
+        l2_init_loss *= self.cfg.l2_init_loss_coeff
+        return l2_init_loss
+
+    # Source: https://github.com/JordanAsh/warm_start/blob/main/run.py#L126
+    # Perhaps we should use it on a subset of params? eg. only on dormant neurons
+    def _shrink_perturb(self, shrink, perturb):
+        # using a randomly-initialized model as a noise source respects how different kinds 
+        # of parameters are often initialized differently
+        old_actor_critic = self.actor_critic
+        new_actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
+        new_actor_critic.model_to_device(self.device)
+
+        params1 = new_actor_critic.parameters()
+        params2 = old_actor_critic.parameters()
+        for p1, p2 in zip(*[params1, params2]):
+            p1.data = copy.deepcopy(shrink * p2.data + perturb * p1.data)
+        return new_actor_critic
+
     def _calculate_neuron_score_all_layers(self, activations):
         all_layers_score = {}
 
@@ -397,71 +425,6 @@ class DatasetLearner(Learner):
                 neuron_scores = mean_abs_activations / (torch.mean(mean_abs_activations) + 1e-9)
                 all_layers_score[layer_name] = neuron_scores
         return all_layers_score
-
-    # def _dead_neurons(self, tau):
-    #     dead_neurons = {}
-
-    #     if self.cfg.actor_critic_share_weights:
-    #         activations = {
-    #                         "encoder": self.actor_critic.encoder.activations, 
-    #                         "decoder": self.actor_critic.decoder.activations,
-    #                       }
-    #         # for dormant ratio
-    #         n_dead = 0
-    #         n_total = 0
-
-    #         for module_name, activations_dict in activations.items():
-    #             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
-    #             for layer_name, layer_scores in all_layers_scores.items():
-    #                 num_neurons = layer_scores.shape[0]
-    #                 num_dead_neurons = (layer_scores <= tau).sum().item()
-
-    #                 dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
-    #                 dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-
-    #                 n_dead += num_dead_neurons
-    #                 n_total += num_neurons
-
-    #         dead_neurons["dormant_ratio"] = n_dead/n_total
-
-    #     else:
-    #         activations = {
-    #                         "actor_encoder": self.actor_critic.actor_encoder.activations,
-    #                         "actor_decoder": self.actor_critic.actor_decoder.activations,
-    #                         "critic_encoder": self.actor_critic.critic_encoder.activations,
-    #                         "critic_decoder": self.actor_critic.critic_decoder.activations,
-    #                       }
-
-    #         # for dormant ratio
-    #         n_dead_actor = 0
-    #         n_dead_critic = 0
-    #         n_total_actor = 0
-    #         n_total_critic = 0
-
-    #         for module_name, activations_dict in activations.items():
-    #             all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
-    #             for layer_name, layer_scores in all_layers_scores.items():
-    #                 num_neurons = layer_scores.shape[0]
-    #                 num_dead_neurons = (layer_scores <= tau).sum().item()
-
-    #                 dead_neurons['n_dead__' + module_name + '__' + layer_name] = num_dead_neurons
-    #                 dead_neurons['pct_dead__' + module_name + '__' + layer_name] = num_dead_neurons/num_neurons*100
-
-    #                 if "actor" in module_name:
-    #                     n_dead_actor += num_dead_neurons
-    #                     n_total_actor += num_neurons
-    #                 if "critic" in module_name:
-    #                     n_dead_critic += num_dead_neurons
-    #                     n_total_critic += num_neurons
-
-
-    #         dead_neurons["dormant_ratio_actor"] = n_dead_actor/n_total_actor
-    #         dead_neurons["dormant_ratio_critic"] = n_dead_critic/n_total_critic
-    #         dead_neurons["dormant_ratio"] = (n_dead_actor + n_dead_critic)/(n_total_actor + n_total_critic)
-
-    #     self.curr_dormant_ratio = dead_neurons["dormant_ratio"]
-
-    #     return dead_neurons
 
     def _dead_neurons_one_module(self, activations_dict, module_name, tau):
         dead_neurons = {}
@@ -546,51 +509,6 @@ class DatasetLearner(Learner):
         }
 
         return per_layer_grad_norms, per_layer_param_norms
-
-    # def _effective_rank(self, srank_threshold, compute_for="actor"):
-            
-    #         if self.cfg.actor_critic_share_weights:
-    #             decoder = self.actor_critic.decoder
-    #             encoder = self.actor_critic.encoder
-    #         else:
-    #             if compute_for == "actor":
-    #                 decoder = self.actor_critic.actor_decoder
-    #                 encoder = self.actor_critic.actor_encoder
-    #             elif compute_for == "critic":
-    #                 decoder = self.actor_critic.critic_decoder
-    #                 encoder = self.actor_critic.critic_encoder
-    #             else:
-    #                 raise ValueError("The value of compute_for must be either 'actor' or 'critic") 
-
-    #         if decoder.last_linear_layer is not None:
-    #             last_layer = decoder.last_linear_layer
-    #             features = decoder.activations["decoder_" + last_layer]
-    #         elif encoder.last_linear_layer is not None:
-    #             last_layer = encoder.last_linear_layer
-    #             features = encoder.activations["encoder_mlp_" + last_layer]
-    #         else:
-    #             raise ValueError("Both Encoder and Decoder lack linear layers!") 
-
-    #         U, S, V = torch.linalg.svd(features)
-
-    #         # Effective feature rank is the number of normalized singular values
-    #         # such that their cumulative sum is greater than some epsilon.
-    #         assert (S < 0).sum() == 0, "Singular values cannot be non-negative."
-    #         s_sum = torch.sum(S)
-
-    #         # Catch case where the regularizer has collapsed the network features
-    #         # This makes the training not crash entirely when rank collapse occurs
-    #         if np.isclose(s_sum.item(), 0.0):
-    #             # Break tie through random selection of two singular values
-    #             indices = torch.randperm(len(S))[:2]
-    #             s_min, s_max = S[indices]
-    #             return torch.zeros(1), s_min, s_max
-    #         else:
-    #             S_normalized = S / s_sum
-    #             S_cum = torch.cumsum(S_normalized, dim=-1)
-    #             # Get the first index where the rank threshold is exceeded
-    #             k = (S_cum > srank_threshold).nonzero()[0]
-    #             return k, S.min(), S.max()
 
     def _calculate_effective_rank(self, features, srank_threshold):
             U, S, V = torch.linalg.svd(features)
@@ -739,9 +657,13 @@ class DatasetLearner(Learner):
                 dataset_num_invalids,
             )
 
+        with self.timing.add_time("l2_init_loss"):
+            l2_init_loss = self._l2_init_loss()
+
         action_distribution = (
             action_distribution if action_distribution is not None else self.actor_critic.action_distribution()
         )
+
         loss_summaries = dict(
             ratio=ratio,
             clip_ratio_low=clip_ratio_low,
@@ -790,6 +712,7 @@ class DatasetLearner(Learner):
             kl_old,
             kl_loss,
             value_loss,
+            l2_init_loss,
             loss_summaries,
             dead_neurons,
             effective_rank,
@@ -885,6 +808,7 @@ class DatasetLearner(Learner):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        l2_init_loss,
                         loss_summaries,
                         dead_neurons,
                         effective_rank,
@@ -901,7 +825,7 @@ class DatasetLearner(Learner):
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
                     critic_loss = value_loss + int_value_loss
 
-                    loss: Tensor = actor_loss + critic_loss + regularizer_loss + predictor_loss
+                    loss: Tensor = actor_loss + critic_loss + regularizer_loss + predictor_loss + l2_init_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -940,6 +864,10 @@ class DatasetLearner(Learner):
                 if self.env_steps >= self.cfg.warmup:
                     # update the weights
                     with timing.add_time("update"):
+                        if self.cfg.use_shrink_perturb and self.env_steps%self.cfg.freq_shrink_perturb == 0:
+                            log.debug(f"Shrink&Perturb will be applied")
+                            self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb)
+
                         if self.train_step % self.cfg.optim_step_every_ith == 0:
                             # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
                             for p in self.actor_critic.parameters():
@@ -1043,7 +971,6 @@ class DatasetLearner(Learner):
         return stats_and_summaries
 
     def train(self, batch: TensorDict) -> Optional[Dict]:
-        # tracemalloc.start()
         if self.cfg.save_milestones_ith > 0 and self.env_steps // self.cfg.save_milestones_ith > self.checkpoint_steps:
             self.save_milestone()
             self.checkpoint_steps = self.env_steps // self.cfg.save_milestones_ith
