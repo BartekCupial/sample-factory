@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 500_000,
+    "train_for_env_steps": 100_000_000,
     "num_workers": 4,
     "num_envs_per_worker": 8,
     "num_batches_per_epoch": 16,
@@ -15,7 +15,7 @@ config = {
     # Wandb settings
     "wandb_user": "e-dobrowolska",
     "wandb_project": "atari",
-    "wandb_group": "montezuma rooms tracker",
+    "wandb_group": "test throughput",
     "wandb_tags": [name],
     "with_wandb": True,
 }
@@ -30,7 +30,7 @@ for atari_game in atari_games:
         {
             "seed": [25],
             "env": [f"atari_{atari_game}"],
-            "count_montezuma_rooms": [True],
+            # "count_montezuma_rooms": [True],
         },
     ]
 

@@ -1,7 +1,6 @@
 from itertools import cycle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Tuple
-import h5py
 # import tracemalloc
 # import nle.dataset as nld
 import numpy as np
@@ -37,6 +36,7 @@ from sf_examples.atari.models.utils import freeze_selected, unfreeze_selected
 
 class MultiFileDataset(torch.utils.data.Dataset):
     def __init__(self, hdf5_files):
+        import h5py
         log.debug(f"Initializing MultiFileDataset with {len(hdf5_files)} files")
         self.hdf5_files = hdf5_files
         self.indices = []
