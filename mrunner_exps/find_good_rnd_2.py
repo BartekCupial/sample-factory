@@ -21,7 +21,7 @@ config = {
     "wandb_tags": [name],
     "batch_size": 4096,  # like in CleanRL
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": True,
+    "with_wandb": False,
     "serial_mode": False,
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
@@ -33,11 +33,13 @@ atari_game = "montezuma"
 
 params_grid = [
     {
-        "seed": [0,1,2],
+        "seed": [0,
+        # 1,2
+        ],
         "learning_rate": [1e-4],
         "async_rl": [True],
         "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [True],
+        "cleanrl_actor_critic": [True],
         "delta": [0.99],
         "with_rnd": [True],
         "gamma": [0.999],  # extrinsic gamma
@@ -48,29 +50,29 @@ params_grid = [
         "encoder_conv_mlp_layers": [[256, 448]],  # like in CleanRL
         "lr_schedule": ["linear_decay"],  # like in CleanRL
         "lr_adaptive_min": [1e-6, 
-                            0.00005,
+                            # 0.00005,
                             ],
         "adam_eps": [1e-5],  # like in CleanRL
         "skip_train": [6400],
     },
-    {
-        "seed": [0,1,2],
-        "learning_rate": [1e-4, 1e-5],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [True],
-        "delta": [0.99],
-        "with_rnd": [True, False],
-        "gamma": [0.999],  # extrinsic gamma
-        "gae_lambda": [0.95],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "encoder_conv_mlp_layers": [[256, 448]],  # like in CleanRL
-        "lr_schedule": ["constant"], 
-        "adam_eps": [1e-5],  # like in CleanRL
-        "skip_train": [6400],
-    },
+    # {
+    #     "seed": [0,1,2],
+    #     "learning_rate": [1e-4, 1e-5],
+    #     "async_rl": [True],
+    #     "env": [f"atari_{atari_game}"],
+    #     "actor_critic_share_weights": [True],
+    #     "delta": [0.99],
+    #     "with_rnd": [True, False],
+    #     "gamma": [0.999],  # extrinsic gamma
+    #     "gae_lambda": [0.95],
+    #     "num_epochs": [4],
+    #     "exploration_loss_coeff": [0.001],
+    #     "repeat_action_probability": [0.25],
+    #     "encoder_conv_mlp_layers": [[256, 448]],  # like in CleanRL
+    #     "lr_schedule": ["constant"], 
+    #     "adam_eps": [1e-5],  # like in CleanRL
+    #     "skip_train": [6400],
+    # },
 ]
 
 experiments_list = create_experiments_helper(

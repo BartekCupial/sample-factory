@@ -19,7 +19,7 @@ config = {
     "wandb_project": "atari",
     "wandb_group": "test heatmaps big",
     "wandb_tags": [name],
-    "batch_size": 256,
+    "batch_size": 4096,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
     "serial_mode": False,

@@ -6,7 +6,7 @@ name = globals()["script"][:-3]
 config = {
     "env": "atari_breakout",
     "exp_tags": [name],
-    "train_for_env_steps": 500_000,
+    "train_for_env_steps": 10_000_000,
     "group": "monk-APPO-KLAA-T",
     "num_workers": 8,
     "num_envs_per_worker": 16,
@@ -22,7 +22,7 @@ config = {
     "wandb_tags": [name],
     "batch_size": 256,
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
+    "with_wandb": True,
     "serial_mode": False,
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
@@ -31,7 +31,7 @@ config = {
 }
 
 # params different between exps
-atari_games = ["breakout"]
+atari_games = ["montezuma"]
 
 params_grid = []
 
