@@ -26,7 +26,6 @@ config = {
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,
     "load_checkpoint_kind": "best",
-    "reward_scale": 0.01,
 }
 
 # params different between exps
@@ -52,7 +51,7 @@ for atari_game in atari_games:
                                     0.00005,
                                     ],
                 "adam_eps": [1e-5],  # like in CleanRL
-                "skip_train": [6400],                
+                "skip_train": [6400],
                 "use_shrink_perturb": [False],
                 "l2_init_loss_coeff": [0.01],
                 "log_heatmaps_to_wandb": [True],

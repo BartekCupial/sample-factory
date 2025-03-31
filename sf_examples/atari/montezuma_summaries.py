@@ -43,7 +43,7 @@ def montezuma_extra_episodic_stats_processing(runner: Runner, msg: Dict, policy_
             room_id = stat_key.split("_")[1]
 
             if room_id not in heatmaps[policy_id]:
-                heatmaps[policy_id][room_id] = []
+                heatmaps[policy_id][room_id] = deque(maxlen=runner.cfg.stats_avg)
 
             heatmaps[policy_id][room_id].append(stat_value)
             # log.debug(f"[CHECK] heatmap has {len(heatmaps)} keys, policy one has {len(heatmaps[policy_id])} keys, room one {room_id} has {len(heatmaps[policy_id][room_id])} keys")
@@ -71,24 +71,21 @@ def montezuma_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: in
     # we can access Learners like this
     # learner = runner.learners[policy_id].learner
 
-    for room_id in heatmaps[policy_id].keys():
-        mean_heatmap = np.mean(heatmaps[policy_id][room_id], axis=0)
-        normalized_heatmap = mean_heatmap.astype(np.float32)
-        normalized_heatmap = (normalized_heatmap - normalized_heatmap.min()) / (np.ptp(normalized_heatmap) + 1e-8)
-        normalized_heatmap = np.uint8(255 * normalized_heatmap)
-
-        if env_steps-last_saved>cfg.heatmap_save_freq:
+    if env_steps-last_saved>cfg.heatmap_save_freq:
+        for room_id in heatmaps[policy_id].keys():
+            mean_heatmap = np.mean(heatmaps[policy_id][room_id], axis=0)
+            normalized_heatmap = mean_heatmap.astype(np.float32)
+            normalized_heatmap = (normalized_heatmap - normalized_heatmap.min()) / (np.ptp(normalized_heatmap) + 1e-8)
+            normalized_heatmap = np.uint8(255 * normalized_heatmap)
 
             # save the heatmap as a PNG file:
             if cfg.save_heatmaps_locally:
-                log.debug(f"Saving heatmaps at /homeplaceholder/images/{montezuma_extra_summaries.date_time}, env_steps is {env_steps}, last_saved at {last_saved}")
-                os.makedirs(f"/homeplaceholder/images/{montezuma_extra_summaries.date_time}", exist_ok = True)
+                log.debug(f"Saving heatmaps at /homeplaceholder/images, env_steps is {env_steps}, last_saved at {last_saved}")
+                os.makedirs(f"/homeplaceholder/images", exist_ok = True)
                 fig, ax = plt.subplots(figsize=(6, 6))
                 cax = ax.imshow(normalized_heatmap, cmap='viridis', interpolation='nearest')
                 ax.set_title(f'Heatmap for Room {room_id}, env_step {env_steps}')
-                # cv2.imwrite("/homeplaceholder/images/heatmap_{room_id}.png", fig)
-
-                fig.savefig(f"/homeplaceholder/images/{montezuma_extra_summaries.date_time}/heatmap_{room_id}__{env_steps}.png")
+                fig.savefig(f"/homeplaceholder/images/heatmap_{room_id}__{env_steps}.png")
                 plt.close(fig)
 
             # this will log to wandb

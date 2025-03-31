@@ -27,6 +27,7 @@ config = {
     "kickstarting_loss_coeff": 0.0,
     "load_checkpoint_kind": "best",
     "reward_scale": 0.01,
+    "device": "cpu",
 }
 
 # params different between exps
@@ -41,14 +42,16 @@ for atari_game in atari_games:
                 "seed": list(range(1)),
                 "learning_rate": [learning_rate],
                 "env": [f"atari_{atari_game}"],
-                "cleanrl_actor_critic": [True],
+                "cleanrl_actor_critic": [False],
+                "actor_critic_share_weights": [False],
                 "delta": [0.99],
                 "with_rnd": [True],
                 "gamma": [0.999],  # extrinsic gamma
                 "num_epochs": [4],
                 "repeat_action_probability": [0.25],
-                "use_shrink_perturb": [False],
-                "freq_shrink_perturb": [100_000_000],
+                "use_shrink_perturb": [True],
+                "freq_shrink_perturb": [150_000],
+                "modules_to_perturb": [["predictor_network", "int_critic"]],
                 "l2_init_loss_coeff": [0.01],
                 "log_heatmaps_to_wandb": [True],
                 "save_heatmaps_locally": [True],

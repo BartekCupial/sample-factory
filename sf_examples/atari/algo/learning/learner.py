@@ -395,17 +395,23 @@ class DatasetLearner(Learner):
 
     # Source: https://github.com/JordanAsh/warm_start/blob/main/run.py#L126
     # Perhaps we should use it on a subset of params? eg. only on dormant neurons
-    def _shrink_perturb(self, shrink, perturb):
+    def _shrink_perturb(self, shrink, perturb, modules_to_perturb=None):
         # using a randomly-initialized model as a noise source respects how different kinds 
         # of parameters are often initialized differently
         old_actor_critic = self.actor_critic
         new_actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
         new_actor_critic.model_to_device(self.device)
 
-        params1 = new_actor_critic.parameters()
-        params2 = old_actor_critic.parameters()
-        for p1, p2 in zip(*[params1, params2]):
-            p1.data = copy.deepcopy(shrink * p2.data + perturb * p1.data)
+        # params1 = new_actor_critic.parameters()
+        # params2 = old_actor_critic.parameters()
+        # for p1, p2 in zip(*[params1, params2]):
+        #     p1.data = copy.deepcopy(shrink * p2.data + perturb * p1.data)
+        # return new_actor_critic
+
+        for (name, new_module), (_, old_module) in zip(new_actor_critic.named_children(), old_actor_critic.named_children()):
+            if modules_to_perturb is None or name in modules_to_perturb:
+                for new_param, old_param in zip(new_module.parameters(), old_module.parameters()):
+                    new_param.data = copy.deepcopy(shrink * old_param.data + perturb * new_param.data)
         return new_actor_critic
 
     def _calculate_neuron_score_all_layers(self, activations):
@@ -448,7 +454,24 @@ class DatasetLearner(Learner):
     def _dead_neurons(self, tau):
         dead_neurons = {}
 
-        if self.cfg.actor_critic_share_weights:
+        if self.cfg.cleanrl_actor_critic:
+            activations = {
+                            "encoder": self.actor_critic.encoder.activations, 
+                            "decoder": self.actor_critic.decoder.activations,
+                            "extra": self.actor_critic.extra_activations,
+                        }
+            # for dormant ratio
+            n_dead = 0
+            n_total = 0
+
+            for module_name, activations_dict in activations.items():
+                dead_neurons_one, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
+                dead_neurons.update(dead_neurons_one)
+                n_dead += n_dead_module
+                n_total += n_total_module
+
+            dead_neurons["dormant_ratio"] = n_dead/n_total
+        elif self.cfg.actor_critic_share_weights:
             activations = {
                             "encoder": self.actor_critic.encoder.activations, 
                             "decoder": self.actor_critic.decoder.activations,
@@ -479,7 +502,7 @@ class DatasetLearner(Learner):
             n_total_critic = 0
 
             for module_name, activations_dict in activations.items():
-                dead_neurons, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
+                dead_neurons_one, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
                 dead_neurons.update(dead_neurons_one)
                 if "actor" in module_name:
                     n_dead_actor += n_dead_module
@@ -534,7 +557,17 @@ class DatasetLearner(Learner):
 
     def _effective_rank(self, srank_threshold, compute_for="actor"):
             
-            if self.cfg.actor_critic_share_weights:
+            if self.cfg.cleanrl_actor_critic:
+                if compute_for == "actor":
+                    last_layer = self.actor_critic.actor_last_linear_layer
+                    features = self.actor_critic.extra_activations["actor_" + last_layer]
+                if compute_for == "critic":
+                    last_layer = self.actor_critic.critic_last_linear_layer
+                    features = self.actor_critic.extra_activations["critic_" + last_layer]
+
+                return self._calculate_effective_rank(features, srank_threshold)
+
+            elif self.cfg.actor_critic_share_weights:
                 decoder = self.actor_critic.decoder
                 encoder = self.actor_critic.encoder
             else:
@@ -682,14 +715,14 @@ class DatasetLearner(Learner):
 
         dead_neurons = self._dead_neurons(self.cfg.tau)
 
-        if self.cfg.actor_critic_share_weights: 
-            rank, _, _ = self._effective_rank(self.cfg.delta)
-            #log.debug(f"Effective Rank: {rank}")
-            effective_rank = {"effective_rank": rank}
-        else:
+        if self.cfg.cleanrl_actor_critic or not self.cfg.actor_critic_share_weights:
             actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
             critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
             effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
+        else: 
+            rank, _, _ = self._effective_rank(self.cfg.delta)
+            #log.debug(f"Effective Rank: {rank}")
+            effective_rank = {"effective_rank": rank}
 
         if self.cfg.with_rnd:
             activations_dict = self.actor_critic.predictor_activations
@@ -866,7 +899,7 @@ class DatasetLearner(Learner):
                     with timing.add_time("update"):
                         if self.cfg.use_shrink_perturb and self.env_steps%self.cfg.freq_shrink_perturb == 0:
                             log.debug(f"Shrink&Perturb will be applied")
-                            self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb)
+                            self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb, self.cfg.modules_to_perturb)
 
                         if self.train_step % self.cfg.optim_step_every_ith == 0:
                             # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()

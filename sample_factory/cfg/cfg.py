@@ -291,6 +291,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument("--freq_shrink_perturb", default=50_000_000, type=float, help="Update frequency for Shrink&Perturb")
     p.add_argument("--shrink", default=0.4, type=float, help="Shrinking coefficient for Shrink&Perturb")  # Default: as in the paper
     p.add_argument("--perturb", default=0.1, type=float, help="Perturbation coefficient for Shrink&Perturb")  # Default: as in the paper
+    p.add_argument("--modules_to_perturb", default=None, type=ast.literal_eval, help="List of modules that Shrink&Perturb will be applied to, default: all of them (the entire actor-critic)")  # Default: as in the paper
 
 
     # optimization

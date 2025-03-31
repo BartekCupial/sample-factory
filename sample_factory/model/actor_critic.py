@@ -120,7 +120,7 @@ class ActorCritic(nn.Module, Configurable):
             # do nothing
             pass
 
-        self.initial_state = self.state_dict()  # Save initial state for L2 init loss
+        # self.initial_state = copy.deepcopy(self.state_dict())  # Save initial state for L2 init loss
 
     def normalize_obs(self, obs: Dict[str, Tensor]) -> Dict[str, Tensor]:
         return self.obs_normalizer(obs)
@@ -197,6 +197,9 @@ class ActorCriticSharedWeights(ActorCritic):
                 return layer
 
             # Prediction network
+            self.predictor_activations = {}
+            self.predictor_last_linear_layer = None
+
             self.predictor_network = nn.Sequential(
                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
                 nn.LeakyReLU(),
@@ -231,7 +234,9 @@ class ActorCriticSharedWeights(ActorCritic):
             for param in self.target_network.parameters():
                 param.requires_grad = False
 
+        self.register_hooks()
         self.n_params = self.get_n_params()
+        self.initial_state = copy.deepcopy(self.state_dict())  # Save initial state for L2 init loss
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -250,6 +255,33 @@ class ActorCriticSharedWeights(ActorCritic):
         n_params = sum(p.numel() for p in self.parameters())
 
         return n_params
+
+    def register_hooks(self):
+        for name, layer in self.extra_layer_actor.named_modules():    
+            if isinstance(layer, nn.Linear):
+                self.actor_last_linear_layer = name
+                layer.register_forward_hook(self.save_extra_hook(name, "actor"))
+        
+        for name, layer in self.extra_layer_critic.named_modules():    
+            if isinstance(layer, nn.Linear):
+                self.critic_last_linear_layer = name
+                layer.register_forward_hook(self.save_extra_hook(name, "critic"))
+
+        for name, layer in self.predictor_network.named_modules():
+            if isinstance(layer, nn.Linear):
+                self.predictor_last_linear_layer = name
+                layer.register_forward_hook(self.save_predictor_hook(name, True))
+            elif isinstance(layer, nn.Conv2d):
+                layer.register_forward_hook(self.save_predictor_hook(name, False))
+
+
+    def save_predictor_hook(self, layer_name, is_linear):
+        def hook(module, input, output):
+            if is_linear:
+                self.predictor_activations["predictor_mlp_" + layer_name] = output
+            else:
+                self.predictor_activations["predictor_conv_" + layer_name] = output
+        return hook
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
@@ -314,6 +346,7 @@ class CleanRLActorCritic(ActorCritic):
             torch.nn.init.orthogonal_(layer.weight, std)
             torch.nn.init.constant_(layer.bias, bias_const)
             return layer
+
         self.extra_layer_critic = nn.Sequential(layer_init(nn.Linear(448, 448), std=0.1), nn.ReLU())
         self.extra_layer_actor = nn.Sequential(layer_init(nn.Linear(448, 448), std=0.01), nn.ReLU())
         
@@ -322,6 +355,10 @@ class CleanRLActorCritic(ActorCritic):
 
         self.with_rnd = cfg.with_rnd
         self.apply(self.initialize_weights)
+        self.actor_last_linear_layer = None
+        self.critic_last_linear_layer = None
+            
+        self.extra_activations = {}
 
         # RND Networks
         if self.with_rnd:
@@ -338,6 +375,7 @@ class CleanRLActorCritic(ActorCritic):
             # Prediction network
             self.predictor_activations = {}
             self.predictor_last_linear_layer = None
+
             self.predictor_network = nn.Sequential(
                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
                 nn.LeakyReLU(),
@@ -352,8 +390,6 @@ class CleanRLActorCritic(ActorCritic):
                 nn.ReLU(),
                 layer_init(nn.Linear(512, 512)),
             )
-
-            self.register_hooks()
 
             # Target network
             self.target_network = nn.Sequential(
@@ -374,7 +410,9 @@ class CleanRLActorCritic(ActorCritic):
             for param in self.target_network.parameters():
                 param.requires_grad = False
 
+        self.register_hooks()
         self.n_params = self.get_n_params()
+        self.initial_state = copy.deepcopy(self.state_dict()) 
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -395,19 +433,35 @@ class CleanRLActorCritic(ActorCritic):
         return n_params
 
     def register_hooks(self):
+        for name, layer in self.extra_layer_actor.named_modules():    
+            if isinstance(layer, nn.Linear):
+                self.actor_last_linear_layer = name
+                layer.register_forward_hook(self.save_extra_hook(name, "actor"))
+        
+        for name, layer in self.extra_layer_critic.named_modules():    
+            if isinstance(layer, nn.Linear):
+                self.critic_last_linear_layer = name
+                layer.register_forward_hook(self.save_extra_hook(name, "critic"))
+
         for name, layer in self.predictor_network.named_modules():
             if isinstance(layer, nn.Linear):
                 self.predictor_last_linear_layer = name
-                layer.register_forward_hook(self.save_activations_hook(name, True))
+                layer.register_forward_hook(self.save_predictor_hook(name, True))
             elif isinstance(layer, nn.Conv2d):
-                layer.register_forward_hook(self.save_activations_hook(name, False))
+                layer.register_forward_hook(self.save_predictor_hook(name, False))
 
-    def save_activations_hook(self, layer_name, is_linear):
+
+    def save_predictor_hook(self, layer_name, is_linear):
         def hook(module, input, output):
             if is_linear:
                 self.predictor_activations["predictor_mlp_" + layer_name] = output
             else:
                 self.predictor_activations["predictor_conv_" + layer_name] = output
+        return hook
+
+    def save_extra_hook(self, layer_name, prefix):
+        def hook(module, input, output):
+            self.extra_activations[prefix + "_" + layer_name] = output
         return hook
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
@@ -492,6 +546,9 @@ class ActorCriticSeparateWeights(ActorCritic):
                 return layer
 
             # Prediction network
+            self.predictor_activations = {}
+            self.predictor_last_linear_layer = None
+
             self.predictor_network = nn.Sequential(
                 layer_init(nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)),
                 nn.LeakyReLU(),
@@ -526,7 +583,9 @@ class ActorCriticSeparateWeights(ActorCritic):
             for param in self.target_network.parameters():
                 param.requires_grad = False
 
+        self.register_hooks()
         self.n_params = self.get_n_params()
+        self.initial_state = copy.deepcopy(self.state_dict()) 
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -545,6 +604,22 @@ class ActorCriticSeparateWeights(ActorCritic):
         n_params = sum(p.numel() for p in self.parameters())
 
         return n_params
+
+    def register_hooks(self):
+        for name, layer in self.predictor_network.named_modules():
+            if isinstance(layer, nn.Linear):
+                self.predictor_last_linear_layer = name
+                layer.register_forward_hook(self.save_predictor_hook(name, True))
+            elif isinstance(layer, nn.Conv2d):
+                layer.register_forward_hook(self.save_predictor_hook(name, False))
+
+    def save_predictor_hook(self, layer_name, is_linear):
+        def hook(module, input, output):
+            if is_linear:
+                self.predictor_activations["predictor_mlp_" + layer_name] = output
+            else:
+                self.predictor_activations["predictor_conv_" + layer_name] = output
+        return hook
 
     def _core_rnn(self, head_output, rnn_states):
         """
