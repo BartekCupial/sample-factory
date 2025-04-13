@@ -60,6 +60,7 @@ for atari_game in atari_games:
                 "heatmap_save_freq": [100_000],
                 "policy_initialization": ["orthogonal"],
                 "env_frameskip": [3],
+                # "decoder_mlp_layers": [[512, 512]],
             },
         ]
 

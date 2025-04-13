@@ -52,20 +52,6 @@ class MultiInputEncoder(Encoder):
             out_size += self.encoders[obs_key].get_out_size()
 
         self.encoder_out_size = out_size
-        self.activations = {}
-        self.last_layer = None
-        self.register_hooks()
-
-    def register_hooks(self):
-        for name, layer in self.named_modules(remove_duplicate=False):
-            if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
-                self.last_layer = name
-                layer.register_forward_hook(self.save_activations_hook(name))
-
-    def save_activations_hook(self, layer_name):
-        def hook(module, input, output):
-            self.activations[layer_name] = output.detach().clone()
-        return hook
 
     def forward(self, obs_dict):
         if len(self.obs_keys) == 1:
@@ -125,20 +111,6 @@ class ConvEncoderImpl(nn.Module):
         self.conv_head = nn.Sequential(*conv_layers)
         self.conv_head_out_size = calc_num_elements(self.conv_head, obs_shape)
         self.mlp_layers = create_mlp(extra_mlp_layers, self.conv_head_out_size, activation)
-        self.i_activations = {}
-        self.i_last_layer = None
-        self.register_hooks()
-
-    def register_hooks(self):
-        for name, layer in self.conv_head.named_modules(remove_duplicate=False):
-            if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
-                self.i_last_layer = name
-                layer.register_forward_hook(self.save_activations_hook(name))
-
-    def save_activations_hook(self, layer_name):
-        def hook(module, input, output):
-            self.i_activations[layer_name] = output.detach().clone()
-        return hook
 
     def forward(self, obs: Tensor) -> Tensor:
         x = self.conv_head(obs)
