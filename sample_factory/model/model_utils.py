@@ -31,9 +31,11 @@ def get_rnn_size(cfg):
 
 def nonlinearity(cfg: Config, inplace: bool = False) -> nn.Module:
     if cfg.nonlinearity == "elu":
-        return nn.ELU(inplace=inplace)
+        # return nn.ELU(inplace=inplace)
+        return nn.ELU()
     elif cfg.nonlinearity == "relu":
-        return nn.ReLU(inplace=inplace)
+        # return nn.ReLU(inplace=inplace)
+        return nn.ReLU()
     elif cfg.nonlinearity == "tanh":
         return nn.Tanh()
     else:

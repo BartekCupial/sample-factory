@@ -17,11 +17,11 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari plasticity_ed",
-    "wandb_group": "heatmaps + S&P on single models",
+    "wandb_group": "heatmaps + S&P on single modules",
     "wandb_tags": [name],
     "batch_size": 4096,  # like in CleanRL
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
-    "with_wandb": False,
+    "with_wandb": True,
     "serial_mode": False,
     "use_pretrained_checkpoint": False,
     "kickstarting_loss_coeff": 0.0,

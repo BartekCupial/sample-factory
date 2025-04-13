@@ -500,26 +500,27 @@ class StickyActionEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
 class MontezumaRoomCountWrapper(gym.Wrapper):
     def __init__(self, env):
         gym.Wrapper.__init__(self, env)
-        self.visited_rooms = np.zeros(24)
-        self.unique_positions = np.zeros(24)
-        self.positions_tracker = [set() for _ in range(24)]
-        self.heatmaps = {}
+        self.visited_rooms = np.zeros(25)  # Stores number of times the agent was in the n-th room within this current episode
+        self.unique_positions = np.zeros(25) # Stores number of unique positions visited in the n-th room, in the whole training
+        self.positions_tracker = [set() for _ in range(25)]  # Stored ids of positions visited in each room -- needed for self.unique_positions
+        self.heatmaps = {}  # Stores heatmaps
         self.episode_length = 0
+        self.counter = 0
 
     def reset(self, **kwargs):
         self.episode_length = 1
-        self.visited_rooms = np.zeros(24)
+        self.visited_rooms = np.zeros(25)  # Reset this each time the new episode starts
         self.heatmaps = {}
         curr_room = self.get_room_number()
-        if f"heatmap_{curr_room-1}" not in self.heatmaps:
-            self.heatmaps[f"heatmap_{curr_room-1}"] = np.zeros((84, 84))
+        if f"heatmap_{curr_room}" not in self.heatmaps:
+            self.heatmaps[f"heatmap_{curr_room}"] = np.zeros((84, 84))
         x, y = self.get_position()
-        self.heatmaps[f"heatmap_{curr_room-1}"][y, x] += 1
-        self.visited_rooms[curr_room-1] +=1
+        self.heatmaps[f"heatmap_{curr_room}"][y, x] += 1
+        self.visited_rooms[curr_room] +=1
 
-        if (x,y) not in self.positions_tracker[curr_room-1]:
-            self.positions_tracker[curr_room-1].add((x,y))
-            self.unique_positions[curr_room-1] += 1
+        if (x,y) not in self.positions_tracker[curr_room]:
+            self.positions_tracker[curr_room].add((x,y))
+            self.unique_positions[curr_room] += 1
 
         return self.env.reset(**kwargs)
 
@@ -531,21 +532,28 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
             self.heatmaps[f"heatmap_{curr_room}"] = np.zeros((84, 84))
         x, y = self.get_position()        
         self.heatmaps[f"heatmap_{curr_room}"][y, x] += 1
-        self.visited_rooms[curr_room-1] +=1
+        self.visited_rooms[curr_room] +=1
 
-        #self.visited_rooms.add(curr_room)        
-        info['episode_extra_stats'] = {
-            "room_count": np.count_nonzero(self.visited_rooms),
-            }
+        if (x,y) not in self.positions_tracker[curr_room]:
+            self.positions_tracker[curr_room].add((x,y))
+            self.unique_positions[curr_room] += 1
+
 
         if terminated | truncated:
+            #self.visited_rooms.add(curr_room)
+            if self.counter % 1000 == 0:
+                log.debug(f"Visited {np.count_nonzero(self.visited_rooms)} rooms after {self.episode_length} steps: {np.nonzero(self.visited_rooms)[0]}")
+            self.counter += 1
+            info['episode_extra_stats'] = {
+                "room_count": np.count_nonzero(self.visited_rooms),
+                }
             info['episode_extra_stats'].update(**self.heatmaps)
             info['episode_extra_stats']["visitation_frequency"] = self.visited_rooms/self.episode_length
 
-            for i in range(24):
+            for i in range(25):
                 if self.visited_rooms[i]:
-                    info['episode_extra_stats'][f"visitation_frequency_{i+1}"] = (self.visited_rooms[i]/self.episode_length).item()
-                    info['episode_extra_stats'][f"unique_positions_{i+1}"] = (self.unique_positions[i]).item()
+                    info['episode_extra_stats'][f"visitation_frequency_{i}"] = (self.visited_rooms[i]/self.episode_length).item()
+                    info['episode_extra_stats'][f"unique_positions_{i}"] = (self.unique_positions[i]).item()
 
             # info['episode_extra_stats']['episode_heatmaps'] = self.heatmaps
             # for room in self.visited_rooms.keys():

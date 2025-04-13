@@ -420,7 +420,8 @@ class DatasetLearner(Learner):
         for layer_name, activations_values in activations.items():
             # batch_size = min(256, activations_values.shape[0])
             # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
-            if "conv" in layer_name:
+            print(f"layer_name: {layer_name}, activations_values.shape {activations_values.shape}, 00: {activations_values[0][0]}")
+            if len(activations_values.shape) == 3:
                 mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (out_channels, height, width)
                 flattened_activations = mean_abs_activations.view(-1)  # Shape: (out_channels * height * width)
                 mean_activation = torch.mean(flattened_activations)  # Scalar
@@ -434,12 +435,13 @@ class DatasetLearner(Learner):
 
     def _dead_neurons_one_module(self, activations_dict, module_name, tau):
         dead_neurons = {}
-
         n_dead = 0
         n_total = 0
 
+
         all_layers_scores = self._calculate_neuron_score_all_layers(activations_dict)
         for layer_name, layer_scores in all_layers_scores.items():
+            # print(f"[000] module name {module_name} layer: {layer_name}, layer_scores.shape {layer_scores.shape}")
             num_neurons = layer_scores.shape[0]
             num_dead_neurons = (layer_scores <= tau).sum().item()
 
@@ -448,6 +450,8 @@ class DatasetLearner(Learner):
 
             n_dead += num_dead_neurons
             n_total += num_neurons
+            # if module_name == "":
+            #     print(f"In layer {layer_name}: {n_dead}/{n_total}={n_dead/n_total}")
 
         return dead_neurons, n_dead, n_total
 
@@ -463,7 +467,6 @@ class DatasetLearner(Learner):
             # for dormant ratio
             n_dead = 0
             n_total = 0
-
             for module_name, activations_dict in activations.items():
                 dead_neurons_one, n_dead_module, n_total_module = self._dead_neurons_one_module(activations_dict, module_name, tau)
                 dead_neurons.update(dead_neurons_one)
@@ -488,8 +491,9 @@ class DatasetLearner(Learner):
 
             dead_neurons["dormant_ratio"] = n_dead/n_total
         else:
+            # print(f"encoders i: {self.actor_critic.actor_encoder.encoders.keys()}")
             activations = {
-                            "actor_encoder": self.actor_critic.actor_encoder.activations,
+                            "actor_encoder": self.actor_critic.a_activations,
                             "actor_decoder": self.actor_critic.actor_decoder.activations,
                             "critic_encoder": self.actor_critic.critic_encoder.activations,
                             "critic_decoder": self.actor_critic.critic_decoder.activations,
@@ -555,17 +559,150 @@ class DatasetLearner(Learner):
                 k = (S_cum > srank_threshold).nonzero()[0]
                 return k, S.min(), S.max()
 
-    def _effective_rank(self, srank_threshold, compute_for="actor"):
+    def compute_ranks_from_features(self, feature_matrices, threshold):
+        """Computes different approximations of the rank of the feature matrices.
+
+        Args:
+            feature_matrices (torch.Tensor): A tensor of shape (B_matrices, N_obs, D_dims).
+
+        (1) Effective rank.
+        A continuous approximation of the rank of a matrix.
+        Definition 2.1. in Roy & Vetterli, (2007) https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7098875
+        Also used in Huh et al. (2023) https://arxiv.org/pdf/2103.10427.pdf
+
+
+        (2) Approximate rank.
+        Threshold at the dimensions explaining 99% of the variance in a PCA analysis.
+        Section 2 in Yang et al. (2020) https://arxiv.org/pdf/1909.12255.pdf
+
+        (3) srank.
+        Another (incorrect?) version of (2).
+        Section 3 in Kumar et al. https://arxiv.org/pdf/2010.14498.pdf
+
+        (4) Feature rank.
+        A threshold rank: normalize by dim size and discard dimensions with singular values below 0.01.
+        Equations (4) and (5). Lyle et al. (2022) https://arxiv.org/pdf/2204.09560.pdf
+
+        (5) PyTorch/NumPy rank.
+        Rank defined in PyTorch and NumPy (https://pytorch.org/docs/stable/generated/torch.linalg.matrix_rank.html)
+        (https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_rank.html)
+        Quoting Numpy:
+            This is the algorithm MATLAB uses [1].
+            It also appears in Numerical recipes in the discussion of SVD solutions for linear least squares [2].
+            [1] MATLAB reference documentation, “Rank” https://www.mathworks.com/help/techdoc/ref/rank.html
+            [2] W. H. Press, S. A. Teukolsky, W. T. Vetterling and B. P. Flannery, “Numerical Recipes (3rd edition)”,
+            Cambridge University Press, 2007, page 795.
+
+        """
+        # cutoff = 0.01  # not used in (1), 1 - 99% in (2), delta in (3), epsilon in (4).
+        # threshold = 1 - cutoff
+        cutoff = 1- threshold
+
+        if feature_matrices.shape[1] < feature_matrices.shape[2]:
+            print(f"Exiting early with shape {feature_matrices.shape}")
+            return {}  # N < D.
+
+        svals = torch.linalg.svdvals(feature_matrices)
+
+        # (1) Effective rank. Roy & Vetterli (2007)
+        sval_sum = torch.sum(svals, dim=1)
+        sval_dist = svals / sval_sum.unsqueeze(-1)
+        # Replace 0 with 1. This is a safe trick to avoid log(0) = -inf
+        # as Roy & Vetterli assume 0*log(0) = 0 = 1*log(1).
+        sval_dist_fixed = torch.where(sval_dist == 0, torch.ones_like(sval_dist), sval_dist)
+        effective_ranks = torch.exp(-torch.sum(sval_dist_fixed * torch.log(sval_dist_fixed), dim=1))
+
+        # (2) Approximate rank. PCA variance. Yang et al. (2020)
+        sval_squares = svals**2
+        sval_squares_sum = torch.sum(sval_squares, dim=1)
+        cumsum_squares = torch.cumsum(sval_squares, dim=1)
+        threshold_crossed = cumsum_squares >= (threshold * sval_squares_sum.unsqueeze(-1))
+        approximate_ranks = (~threshold_crossed).sum(dim=-1) + 1
+
+        # (3) srank. Weird. Kumar et al. (2020)
+        cumsum = torch.cumsum(svals, dim=1)
+        threshold_crossed = cumsum >= threshold * sval_sum.unsqueeze(-1)
+        sranks = (~threshold_crossed).sum(dim=-1) + 1
+
+        # (4) Feature rank. Most basic. Lyle et al. (2022)
+        n_obs = torch.tensor(feature_matrices.shape[1], device=feature_matrices.device)
+        svals_of_normalized = svals / torch.sqrt(n_obs)
+        over_cutoff = svals_of_normalized > cutoff
+        feature_ranks = over_cutoff.sum(dim=-1)
+
+        # (5) PyTorch/NumPy rank.
+        pytorch_ranks = torch.linalg.matrix_rank(feature_matrices)
+
+        # Some singular values.
+        singular_values = dict(
+            lambda_1=svals_of_normalized[:, 0],
+            lambda_N=svals_of_normalized[:, -1],
+        )
+        if svals_of_normalized.shape[1] > 1:
+            singular_values.update(lambda_2=svals_of_normalized[:, 1])
+
+        ranks = dict(
+            effective_rank_vetterli=effective_ranks,
+            approximate_rank_pca=approximate_ranks,
+            srank_kumar=sranks,
+            feature_rank_lyle=feature_ranks,
+            pytorch_rank=pytorch_ranks,
+        )
+
+
+        out = {**singular_values, **ranks}
+
+        return out
+
+    def _effective_rank(self, srank_threshold):
+        with torch.no_grad():
+            if self.cfg.cleanrl_actor_critic:
+                features_actor = self.actor_critic.extra_activations["actor_" + self.actor_critic.actor_last_layer]
+                features_critic = self.actor_critic.extra_activations["critic_" + self.actor_critic.critic_last_layer]
+                features = torch.stack([features_actor, features_critic], dim=0)
+                return self.compute_ranks_from_features(features, srank_threshold)
+            elif self.cfg.actor_critic_share_weights:
+                decoder = self.actor_critic.decoder
+                encoder = self.actor_critic.encoder
+                if decoder.last_layer is not None:
+                    features = decoder.activations[decoder.last_layer].unsqueeze(0)
+                elif encoder.last_layer is not None:
+                    features = encoder.activations[encoder.last_layer].unsqueeze(0)
+            else:
+                actor_decoder = self.actor_critic.actor_decoder
+                actor_encoder = self.actor_critic.actor_encoder
+                if actor_decoder.last_layer is not None:
+                    features_actor = actor_decoder.activations[actor_decoder.last_layer]
+                elif actor_encoder.last_layer is not None:
+                    features_actor = actor_encoder.activations[actor_encoder.last_layer]
+
+                critic_decoder = self.actor_critic.critic_decoder
+                critic_encoder = self.actor_critic.critic_encoder
+                if critic_decoder.last_layer is not None:
+                    features_critic = critic_ecoder.activations[critic_decoder.last_layer]
+                elif critic_encoder.last_layer is not None:
+                    features_critic = critic_encoder.activations[critic_encoder.last_layer]
+                features = torch.stack([features_actor, features_critic], dim=0)
+                # print(f'A: {"actor_mlp_" + self.actor_critic.actor_last_layer}, C: {"critic_mlp_" + self.actor_critic.critic_last_layer}')
+                # features_actor = self.actor_critic.actor_activations["actor_" + self.actor_critic.actor_last_layer]
+                # features_critic = self.actor_critic.critic_activations["critic_mlp_" + self.actor_critic.critic_last_layer]
+
+                # features = torch.stack([features_actor, features_critic], dim=0)
+
+            return self.compute_ranks_from_features(features, srank_threshold)
+
+    def _old_effective_rank(self, srank_threshold, compute_for="actor"):
             
             if self.cfg.cleanrl_actor_critic:
                 if compute_for == "actor":
-                    last_layer = self.actor_critic.actor_last_linear_layer
+                    last_layer = self.actor_critic.actor_last_layer
                     features = self.actor_critic.extra_activations["actor_" + last_layer]
                 if compute_for == "critic":
-                    last_layer = self.actor_critic.critic_last_linear_layer
+                    last_layer = self.actor_critic.critic_last_layer
                     features = self.actor_critic.extra_activations["critic_" + last_layer]
-
-                return self._calculate_effective_rank(features, srank_threshold)
+                print(f"Features shape: {features.shape}")
+                return self.compute_ranks_from_features(features)
+                # return self._calculate_effective_rank(features, srank_threshold)
 
             elif self.cfg.actor_critic_share_weights:
                 decoder = self.actor_critic.decoder
@@ -580,12 +717,12 @@ class DatasetLearner(Learner):
                 else:
                     raise ValueError("The value of compute_for must be either 'actor' or 'critic") 
 
-            if decoder.last_linear_layer is not None:
-                last_layer = decoder.last_linear_layer
-                features = decoder.activations["decoder_" + last_layer]
-            elif encoder.last_linear_layer is not None:
-                last_layer = encoder.last_linear_layer
-                features = encoder.activations["encoder_mlp_" + last_layer]
+            if decoder.last_layer is not None:
+                last_layer = decoder.last_layer
+                features = decoder.activations[last_layer]
+            elif encoder.last_layer is not None:
+                last_layer = encoder.last_layer
+                features = encoder.activations[last_layer]
             else:
                 raise ValueError("Both Encoder and Decoder lack linear layers!") 
 
@@ -716,23 +853,40 @@ class DatasetLearner(Learner):
         dead_neurons = self._dead_neurons(self.cfg.tau)
 
         if self.cfg.cleanrl_actor_critic or not self.cfg.actor_critic_share_weights:
-            actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
-            critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
-            effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
-        else: 
-            rank, _, _ = self._effective_rank(self.cfg.delta)
-            #log.debug(f"Effective Rank: {rank}")
-            effective_rank = {"effective_rank": rank}
+            ranks = self._effective_rank(self.cfg.delta)
+            effective_rank = {}
+            for k, v in ranks.items():
+                effective_rank["actor__" + k] = v[0]
+                effective_rank["critic__" + k] = v[1]
+
+            # print(f"effective_rank: {effective_rank}")
+                
+            # actor_rank, _, _ = self._effective_rank(self.cfg.delta, "actor")
+            # critic_rank, _, _ = self._effective_rank(self.cfg.delta, "critic")
+            # effective_rank = {"effective_rank_actor": actor_rank, "effective_rank_critic": critic_rank}
+        else:
+            # rank, _, _ = self._effective_rank(self.cfg.delta)
+            # effective_rank = {"effective_rank": rank}
+            ranks = self._effective_rank(self.cfg.delta)
+            effective_rank = {}
+            for k, v in ranks.items():
+                effective_rank[k] = v[0]
 
         if self.cfg.with_rnd:
             activations_dict = self.actor_critic.predictor_activations
             dead_neurons_predictor, n_dead_predictor, n_total_predictor = self._dead_neurons_one_module(activations_dict, "", self.cfg.tau)
             dead_neurons_predictor["dormant_ratio_predictor"] = n_dead_predictor/n_total_predictor
             dead_neurons.update(dead_neurons_predictor)
-            predictor_last_linear_layer = self.actor_critic.predictor_last_linear_layer
-            features_predictor = activations_dict["predictor_mlp_" + predictor_last_linear_layer]
-            rank_predictor, _, _ = self._calculate_effective_rank(features_predictor, self.cfg.delta)
-            effective_rank["effective_rank_predictor"] = rank_predictor
+            predictor_last_layer = self.actor_critic.predictor_last_layer
+            features_predictor = activations_dict[predictor_last_layer]
+            # rank_predictor, _, _ = self._calculate_effective_rank(features_predictor, self.cfg.delta)
+            # effective_rank["effective_rank_predictor"] = rank_predictor
+            with torch.no_grad():
+                predictor_ranks = self.compute_ranks_from_features(features_predictor.unsqueeze(0), self.cfg.delta)
+                for k, v in predictor_ranks.items():
+                    effective_rank["predictor_" + k] = v[0]
+
+            print(f"effective_rank: {effective_rank}")
 
             
         per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
