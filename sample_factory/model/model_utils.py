@@ -31,11 +31,11 @@ def get_rnn_size(cfg):
 
 def nonlinearity(cfg: Config, inplace: bool = False) -> nn.Module:
     if cfg.nonlinearity == "elu":
-        # return nn.ELU(inplace=inplace)
-        return nn.ELU()
+        return nn.ELU(inplace=inplace)
+        # return nn.ELU()
     elif cfg.nonlinearity == "relu":
-        # return nn.ReLU(inplace=inplace)
-        return nn.ReLU()
+        return nn.ReLU(inplace=inplace)
+        # return nn.ReLU()
     elif cfg.nonlinearity == "tanh":
         return nn.Tanh()
     else:
@@ -50,6 +50,16 @@ def fc_layer(in_features: int, out_features: int, bias=True, spec_norm=False) ->
     return layer
 
 
+def copy_activation_module(activation):
+    if isinstance(activation, nn.ReLU):
+        new_activation = nn.ReLU()
+    elif isinstance(activation, nn.LeakyReLU):
+        new_activation = nn.LeakyReLU(negative_slope=activation.negative_slope)
+    else:
+        new_activation = activation.__class__()
+    return new_activation
+
+
 def create_mlp(
     layer_sizes: List[int], input_size: int, activation: nn.Module, use_layer_norm: bool = False
 ) -> nn.Module:
@@ -57,9 +67,9 @@ def create_mlp(
     layers = []
     for i, size in enumerate(layer_sizes):
         if i == 0 and use_layer_norm:
-            layers.extend([fc_layer(input_size, size), nn.LayerNorm(size), activation])
+            layers.extend([fc_layer(input_size, size), nn.LayerNorm(size), copy_activation_module(activation)])
         else:
-            layers.extend([fc_layer(input_size, size), activation])
+            layers.extend([fc_layer(input_size, size), copy_activation_module(activation)])
         input_size = size
 
     if len(layers) > 0:

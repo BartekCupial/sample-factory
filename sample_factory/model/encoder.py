@@ -5,7 +5,7 @@ from gymnasium import spaces
 from torch import Tensor, nn
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
-from sample_factory.model.model_utils import ModelModule, create_mlp, model_device, nonlinearity
+from sample_factory.model.model_utils import ModelModule, copy_activation_module, create_mlp, model_device, nonlinearity
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
@@ -104,7 +104,7 @@ class ConvEncoderImpl(nn.Module):
             elif isinstance(layer, (list, tuple)):
                 inp_ch, out_ch, filter_size, stride = layer
                 conv_layers.append(nn.Conv2d(inp_ch, out_ch, filter_size, stride=stride))
-                conv_layers.append(activation)
+                conv_layers.append(copy_activation_module(activation))
             else:
                 raise NotImplementedError(f"Layer {layer} not supported!")
 

@@ -420,8 +420,7 @@ class DatasetLearner(Learner):
         for layer_name, activations_values in activations.items():
             # batch_size = min(256, activations_values.shape[0])
             # mean_abs_activations = torch.mean(torch.abs(activations_values[:batch_size, :]), dim=0)
-            print(f"layer_name: {layer_name}, activations_values.shape {activations_values.shape}, 00: {activations_values.flatten()[0]}")
-            if len(activations_values.shape) == 3:
+            if len(activations_values.shape) > 2:
                 mean_abs_activations = torch.mean(torch.abs(activations_values), dim=0)  # Shape: (out_channels, height, width)
                 flattened_activations = mean_abs_activations.view(-1)  # Shape: (out_channels * height * width)
                 mean_activation = torch.mean(flattened_activations)  # Scalar
@@ -450,7 +449,6 @@ class DatasetLearner(Learner):
         for layer_name, layer_scores in all_layers_scores.items():
             num_neurons = layer_scores.shape[0]
             num_dead_neurons = (layer_scores <= tau).sum().item()
-            print(f"[DEAD] Considering layer {layer_name}: {num_dead_neurons}/{num_neurons}")
 
             dead_neurons['n_dead__' + layer_name] = num_dead_neurons
             dead_neurons['pct_dead__' + layer_name] = num_dead_neurons/num_neurons*100
@@ -593,7 +591,13 @@ class DatasetLearner(Learner):
         with torch.no_grad():
             features_actor = self.actor_critic.activations[self.actor_critic.actor_activation_layers[-1]]
             features_critic = self.actor_critic.activations[self.actor_critic.critic_activation_layers[-1]]
-            features = torch.stack([features_actor, features_critic], dim=0)
+            features = [features_actor, features_critic]
+
+            if self.cfg.with_rnd:
+                features_predictor = self.actor_critic.activations[self.actor_critic.predictor_activation_layers[-1]]
+                features.append(features_predictor)
+            
+            features = torch.stack(features, dim=0)
             return self.compute_ranks_from_features(features, srank_threshold)
 
     def _calculate_losses(
@@ -732,13 +736,10 @@ class DatasetLearner(Learner):
                 effective_rank[k] = v[0]
 
         if self.cfg.with_rnd:
-            with torch.no_grad():
-                features = self.actor_critic.activations[self.actor_critic.predictor_activation_layers[-1]]
-                predictor_ranks = self.compute_ranks_from_features(features.unsqueeze(0), self.cfg.delta)
-                for k, v in predictor_ranks.items():
-                    effective_rank["predictor_" + k] = v[0]
+            for k, v in ranks.items():
+                effective_rank["predictor__" + k] = v[2]
 
-            print(f"effective_rank: {effective_rank}")
+        print(f"effective_rank: {effective_rank}")
 
             
         per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()

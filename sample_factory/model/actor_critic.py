@@ -237,7 +237,7 @@ class ActorCriticSharedWeights(ActorCritic):
         self.n_params = self.get_n_params()
         self.initial_state = copy.deepcopy(self.state_dict())  # Save initial state for L2 init loss
         self.register_hooks()
-        print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
+        # print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -395,7 +395,7 @@ class CleanRLActorCritic(ActorCritic):
         self.n_params = self.get_n_params()
         self.initial_state = copy.deepcopy(self.state_dict()) 
         self.register_hooks()
-        print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
+        # print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -550,7 +550,7 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.n_params = self.get_n_params()
         self.initial_state = copy.deepcopy(self.state_dict()) 
         self.register_hooks()
-        print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
+        # print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
 
     def get_n_params(self):
         self.n_params_encoders = 0
