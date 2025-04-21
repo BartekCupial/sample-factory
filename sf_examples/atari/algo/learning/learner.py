@@ -96,6 +96,8 @@ class DatasetLearner(Learner):
         self.kickstarting_loss_func: Optional[Callable] = None
 
         self.models_frozen = dict(zip(self.cfg.freeze.keys(), [False] * len(self.cfg.freeze)))
+        self.last_perturb_env_step = 0
+        self.last_perturb_train_step = None
 
     def init(self) -> InitModelData:
         init_model_data = super().init()
@@ -393,26 +395,39 @@ class DatasetLearner(Learner):
         l2_init_loss *= self.cfg.l2_init_loss_coeff
         return l2_init_loss
 
-    # Source: https://github.com/JordanAsh/warm_start/blob/main/run.py#L126
-    # Perhaps we should use it on a subset of params? eg. only on dormant neurons
     def _shrink_perturb(self, shrink, perturb, modules_to_perturb=None):
-        # using a randomly-initialized model as a noise source respects how different kinds 
-        # of parameters are often initialized differently
-        old_actor_critic = self.actor_critic
         new_actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
         new_actor_critic.model_to_device(self.device)
 
-        # params1 = new_actor_critic.parameters()
-        # params2 = old_actor_critic.parameters()
-        # for p1, p2 in zip(*[params1, params2]):
-        #     p1.data = copy.deepcopy(shrink * p2.data + perturb * p1.data)
-        # return new_actor_critic
-
-        for (name, new_module), (_, old_module) in zip(new_actor_critic.named_children(), old_actor_critic.named_children()):
+        for (name, new_module), (_, old_module) in zip(new_actor_critic.named_children(), self.actor_critic.named_children()):
             if modules_to_perturb is None or name in modules_to_perturb:
+                print(f"Will perturb in module {name}")
                 for new_param, old_param in zip(new_module.parameters(), old_module.parameters()):
-                    new_param.data = copy.deepcopy(shrink * old_param.data + perturb * new_param.data)
-        return new_actor_critic
+                    old_param.data.mul_(shrink).add_(perturb * new_param.data)
+
+        return self.actor_critic 
+        
+    # # Source: https://github.com/JordanAsh/warm_start/blob/main/run.py#L126
+    # # Perhaps we should use it on a subset of params? eg. only on dormant neurons
+    # def _shrink_perturb(self, shrink, perturb, modules_to_perturb=None):
+    #     # using a randomly-initialized model as a noise source respects how different kinds 
+    #     # of parameters are often initialized differently
+    #     old_actor_critic = self.actor_critic
+    #     new_actor_critic = create_actor_critic(self.cfg, self.env_info.obs_space, self.env_info.action_space)
+    #     new_actor_critic.model_to_device(self.device)
+
+    #     # params1 = new_actor_critic.parameters()
+    #     # params2 = old_actor_critic.parameters()
+    #     # for p1, p2 in zip(*[params1, params2]):
+    #     #     p1.data = copy.deepcopy(shrink * p2.data + perturb * p1.data)
+    #     # return new_actor_critic
+
+    #     for (name, new_module), (_, old_module) in zip(new_actor_critic.named_children(), old_actor_critic.named_children()):
+    #         if modules_to_perturb is None or name in modules_to_perturb:
+    #             for new_param, old_param in zip(new_module.parameters(), old_module.parameters()):
+                    # print(f"Will perturb parameter in module {name}")
+    #                 new_param.data = copy.deepcopy(shrink * old_param.data + perturb * new_param.data)
+    #     return new_actor_critic
 
     def _calculate_neuron_score_all_layers(self, activations):
         all_layers_score = {}
@@ -593,9 +608,9 @@ class DatasetLearner(Learner):
             features_critic = self.actor_critic.activations[self.actor_critic.critic_activation_layers[-1]]
             features = [features_actor, features_critic]
 
-            if self.cfg.with_rnd:
-                features_predictor = self.actor_critic.activations[self.actor_critic.predictor_activation_layers[-1]]
-                features.append(features_predictor)
+            # if self.cfg.with_rnd:
+            #     features_predictor = self.actor_critic.activations[self.actor_critic.predictor_activation_layers[-1]]
+            #     features.append(features_predictor)
             
             features = torch.stack(features, dim=0)
             return self.compute_ranks_from_features(features, srank_threshold)
@@ -736,10 +751,12 @@ class DatasetLearner(Learner):
                 effective_rank[k] = v[0]
 
         if self.cfg.with_rnd:
-            for k, v in ranks.items():
-                effective_rank["predictor__" + k] = v[2]
+            features_predictor = self.actor_critic.activations[self.actor_critic.predictor_activation_layers[-1]]
+            predictor_ranks = self.compute_ranks_from_features(features_predictor.unsqueeze(0), self.cfg.delta)
+            for k, v in predictor_ranks.items():
+                effective_rank["predictor__" + k] = v[0]
 
-        print(f"effective_rank: {effective_rank}")
+        # print(f"effective_rank: {effective_rank}")
 
             
         per_layer_grad_norms, per_layer_param_norms = self._grad_and_param_norms()
@@ -904,9 +921,22 @@ class DatasetLearner(Learner):
                 if self.env_steps >= self.cfg.warmup:
                     # update the weights
                     with timing.add_time("update"):
-                        if self.cfg.use_shrink_perturb and self.env_steps%self.cfg.freq_shrink_perturb == 0:
+                        if ((self.cfg.use_shrink_perturb)
+                         and (self.env_steps>self.cfg.freeze_shrink_perturb)
+                          and (self.env_steps - self.last_perturb_env_step > self.cfg.freq_shrink_perturb)):
+                            log.debug(f"Freezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
+                            for param in self.actor_critic.predictor_network.parameters():
+                                param.requires_grad = False
                             log.debug(f"Shrink&Perturb will be applied")
                             self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb, self.cfg.modules_to_perturb)
+                            self.last_perturb_env_step = self.env_steps
+                            self.last_perturb_train_step = self.train_step
+
+                        if self.last_perturb_train_step is not None and self.train_step - self.last_perturb_train_step >= self.cfg.freeze_predictor:
+                            log.debug(f"Unfreezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
+                            for param in self.actor_critic.predictor_network.parameters():
+                                param.requires_grad = True
+                            self.last_perturb_train_step = None
 
                         if self.train_step % self.cfg.optim_step_every_ith == 0:
                             # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()

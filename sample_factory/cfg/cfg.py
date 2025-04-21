@@ -289,10 +289,11 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument("--l2_init_loss_coeff", default=0.0, type=float, help="Coefficient for the l2_init loss")  # Default: don't use
     p.add_argument("--use_shrink_perturb", default=False, type=str2bool, help="Whether Shrink&Perturb should be applied")  # Default: don't use
     p.add_argument("--freq_shrink_perturb", default=50_000_000, type=float, help="Update frequency for Shrink&Perturb")
+    p.add_argument("--freeze_shrink_perturb", default=0, type=float, help="Freeze Shrink&Perturb")
     p.add_argument("--shrink", default=0.4, type=float, help="Shrinking coefficient for Shrink&Perturb")  # Default: as in the paper
     p.add_argument("--perturb", default=0.1, type=float, help="Perturbation coefficient for Shrink&Perturb")  # Default: as in the paper
     p.add_argument("--modules_to_perturb", default=None, type=ast.literal_eval, help="List of modules that Shrink&Perturb will be applied to, default: all of them (the entire actor-critic)")  # Default: as in the paper
-
+    p.add_argument("--freeze_predictor", default=0, type=int, help="Number of train steps when predictor is frozen after S+P")
 
     # optimization
     p.add_argument(
