@@ -67,9 +67,10 @@ for atari_game in atari_games:
         "learning_rate": [1e-4],
         "async_rl": [True],
         "env": [f"atari_{atari_game}"],
-        "cleanrl_actor_critic": [True],
+        # "cleanrl_actor_critic": [True],
+        "actor_critic_share_weights": [False],
         "delta": [0.99],
-        "with_rnd": [True],
+        "with_rnd": [False],
         "gamma": [0.999],  # extrinsic gamma
         "gae_lambda": [0.95],
         "num_epochs": [4],

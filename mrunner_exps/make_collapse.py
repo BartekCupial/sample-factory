@@ -17,7 +17,6 @@ config = {
     # Wandb settings
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari plasticity_ed",
-    "wandb_group": "try different settings, breakout",
     "batch_size": 4096,  # like in CleanRL
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
     "with_wandb": True,
@@ -28,152 +27,68 @@ config = {
 }
 
 # params different between exps
-# atari_game = "breakout"
-atari_game = "phoenix"
+games = ["phoenix", "qbert", "breakout", "seaquest", "namethisgame"]
+params_grid = []
 
-params_grid = [
-    {
-        "wandb_tags": ["Control"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-    },    
-    {
-        "wandb_tags": ["ShareWeights"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [True],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-    },
-    {
-        "wandb_tags": ["Sharp RL decay"],
-        "seed": list(range(5)),
-        "learning_rate": [0.001],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["linear_decay"],  # like in CleanRL
-        "lr_adaptive_min": [0.000005],
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-    },
-    {
-        "wandb_tags": ["Big Networks"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-        "encoder_conv_mlp_layers": [[1024,1024]],
-    },
-    {
-        "wandb_tags": ["Epochs"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [12],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-    },
-    {
-        "wandb_tags": ["Value Clip"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-        "ppo_clip_value": [0.05],
-    },
-    {
-        "wandb_tags": ["Value Coeff"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-        "value_loss_coeff": [5.0],
-    },
-    {
-        "wandb_tags": ["Skip Train"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-        "skip_train": [10_000],
-    },
-    {
-        "wandb_tags": ["Normalize Input"],
-        "seed": list(range(5)),
-        "learning_rate": [0.00025],
-        "async_rl": [True],
-        "env": [f"atari_{atari_game}"],
-        "actor_critic_share_weights": [False],
-        "delta": [0.99],
-        "num_epochs": [4],
-        "exploration_loss_coeff": [0.001],
-        "repeat_action_probability": [0.25],
-        "lr_schedule": ["constant"],  # like in CleanRL
-        "adam_eps": [1e-5],  # like in CleanRL
-        "l2_init_loss_coeff": [0.0],
-        "normalize_input": [False],
-    },  
-]
+for atari_game in games:
+    params_grid.extend([
+        # {
+        #     "wandb_tags": ["Control"],
+        #     "wandb_group": [f"S+P, {atari_game}"],
+        #     "seed": list(range(5)),
+        #     "learning_rate": [0.00025],
+        #     "async_rl": [True],
+        #     "env": [f"atari_{atari_game}"],
+        #     "actor_critic_share_weights": [False],
+        #     "delta": [0.99],
+        #     "num_epochs": [4],
+        #     "exploration_loss_coeff": [0.001],
+        #     "repeat_action_probability": [0.25],
+        #     "lr_schedule": ["constant"],  # like in CleanRL
+        #     "adam_eps": [1e-5],  # like in CleanRL
+        #     "l2_init_loss_coeff": [0.0],
+        # },
+        {
+            "wandb_tags": ["Sharp RL decay"],
+            "wandb_group": [f"S+P, {atari_game}"],
+            "seed": list(range(5)),
+            "learning_rate": [0.001],
+            "async_rl": [True],
+            "env": [f"atari_{atari_game}"],
+            "actor_critic_share_weights": [False],
+            "delta": [0.99],
+            "num_epochs": [4],
+            "exploration_loss_coeff": [0.001],
+            "repeat_action_probability": [0.25],
+            "lr_schedule": ["linear_decay"],  # like in CleanRL
+            "adam_eps": [1e-5],  # like in CleanRL
+            "l2_init_loss_coeff": [0.0],
+            "use_shrink_perturb": [True],
+            "freq_shrink_perturb": [50_000_000],
+            "shrink": [0.4],
+            "perturb": [0.6],
+        },
+        {
+            "wandb_tags": ["Epochs"],
+            "wandb_group": [f"S+P, {atari_game}"],
+            "seed": list(range(5)),
+            "learning_rate": [0.00025],
+            "async_rl": [True],
+            "env": [f"atari_{atari_game}"],
+            "actor_critic_share_weights": [False],
+            "delta": [0.99],
+            "num_epochs": [12],
+            "exploration_loss_coeff": [0.001],
+            "repeat_action_probability": [0.25],
+            "lr_schedule": ["constant"],  # like in CleanRL
+            "adam_eps": [1e-5],  # like in CleanRL
+            "l2_init_loss_coeff": [0.0],
+            "use_shrink_perturb": [True],
+            "freq_shrink_perturb": [50_000_000],
+            "shrink": [0.4],
+            "perturb": [0.6],
+        },
+    ])
 
 experiments_list = create_experiments_helper(
     experiment_name=name,

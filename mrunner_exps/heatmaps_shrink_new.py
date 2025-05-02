@@ -18,7 +18,7 @@ config = {
     "wandb_user": "ideas-ncbr",
     "wandb_project": "atari plasticity_ed",
     # "wandb_group": "heatmaps + S&P on single modules, new ranks (corrected)",
-    "wandb_group": "heatmaps, S&P every 100M steps, corrected",
+    "wandb_group": "heatmaps, S&P every 100M steps, +DRM",
     "wandb_tags": [name],
     "batch_size": 4096,  # like in CleanRL
     "dataset_batch_size": 512,  # this equals bs = 512, 512 * 32 = 16384
@@ -112,12 +112,12 @@ params_grid = [
         "lr_adaptive_min": [0.00005],
         "adam_eps": [1e-5],  # like in CleanRL
         "skip_train": [6400],
-        "use_shrink_perturb": [True],
         "freeze_shrink_perturb": [0],
         # "freq_shrink_perturb": [10_000_000],
         "freq_shrink_perturb": [100_000_000],
-        "shrink": [0.9],
-        "perturb": [0.1],
+        "use_shrink_perturb": [True],
+        "shrink": [0.95],
+        "perturb": [0.05],
         "modules_to_perturb": [
             ["encoder", "decoder", "extra_layer_actor", "extra_layer_critic", "action_parametrization", "critic"],
         ],
@@ -147,8 +147,8 @@ params_grid = [
         "freeze_shrink_perturb": [0],
         # "freq_shrink_perturb": [10_000_000],
         "freq_shrink_perturb": [100_000_000],
-        "shrink": [0.99],
-        "perturb": [0.01],
+        "shrink": [0.05],
+        "perturb": [0.95],
         "modules_to_perturb": [
             ["encoder", "decoder", "extra_layer_actor", "extra_layer_critic", "action_parametrization", "critic"],
         ],

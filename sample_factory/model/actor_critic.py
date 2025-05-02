@@ -67,9 +67,12 @@ class ActorCritic(nn.Module, Configurable):
         self.activations = {}
         self.actor_activation_layers = []
         self.critic_activation_layers = []
+        self.actor_pre_activation_layers = []
+        self.critic_pre_activation_layers = []
 
         if self.cfg.with_rnd:
             self.predictor_activation_layers = []
+            self.predictor_pre_activation_layers = []
 
     def get_action_parameterization(self, decoder_output_size: int):
         if not self.cfg.adaptive_stddev and is_continuous_action_space(self.action_space):
@@ -259,9 +262,13 @@ class ActorCriticSharedWeights(ActorCritic):
 
     def register_hooks(self):
         for name, layer in self.named_modules(remove_duplicate=False):
-            if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU) and 'target' not in name:  # we don't need activations for the target network
-                layer.register_forward_hook(self.save_hook(name))
-                self.update_activation_layers(name)
+            if 'target' not in name:  # we don't need activations for the target network
+                if isinstance(layer, nn.Linear) or isinstance(layer, nn.Conv2d):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_pre_activation_layers(name)
+                if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_activation_layers(name)
 
     def save_hook(self, layer_name):
         def hook(module, input, output):
@@ -271,9 +278,16 @@ class ActorCriticSharedWeights(ActorCritic):
     def update_activation_layers(self, name):
             if "predictor_network" in name:
                 self.predictor_activation_layers.append(name)
-            else:
+            elif "int" not in name:
                 self.actor_activation_layers.append(name)
                 self.critic_activation_layers.append(name)
+
+    def update_pre_activation_layers(self, name):
+            if "predictor_network" in name:
+                self.predictor_pre_activation_layers.append(name)
+            elif "int" not in name:
+                self.actor_pre_activation_layers.append(name)
+                self.critic_pre_activation_layers.append(name)
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = self.encoder(normalized_obs_dict)
@@ -395,7 +409,8 @@ class CleanRLActorCritic(ActorCritic):
         self.n_params = self.get_n_params()
         self.initial_state = copy.deepcopy(self.state_dict()) 
         self.register_hooks()
-        # print(f"layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
+        print(f"Pre-activation layers: actor {self.actor_pre_activation_layers}, critic: {self.critic_pre_activation_layers}, predictor: {self.predictor_pre_activation_layers}")
+        print(f"Activation layers: actor {self.actor_activation_layers}, critic: {self.critic_activation_layers}, predictor: {self.predictor_activation_layers}")
 
     def get_n_params(self):
         self.n_params_encoders = 0
@@ -417,21 +432,33 @@ class CleanRLActorCritic(ActorCritic):
 
     def register_hooks(self):
         for name, layer in self.named_modules(remove_duplicate=False):
-            if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU) and 'target' not in name:  # we don't need activations for the target network
-                layer.register_forward_hook(self.save_hook(name))
-                self.update_activation_layers(name)
+            if 'target' not in name:  # we don't need activations for the target network
+                if isinstance(layer, nn.Linear) or isinstance(layer, nn.Conv2d):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_pre_activation_layers(name)
+                if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_activation_layers(name)
 
     def save_hook(self, layer_name):
         def hook(module, input, output):
             self.activations[layer_name] = output.detach().clone()
         return hook
 
+    def update_pre_activation_layers(self, name):
+        if "predictor_network" in name:
+            self.predictor_pre_activation_layers.append(name)
+        if "encoder" in name or "actor" in name:
+            self.actor_pre_activation_layers.append(name)
+        if ("encoder" in name or "critic" in name) and "int" not in name:
+            self.critic_pre_activation_layers.append(name)
+
     def update_activation_layers(self, name):
         if "predictor_network" in name:
             self.predictor_activation_layers.append(name)
-        elif "actor" in name:
+        if "encoder" in name or "actor" in name:
             self.actor_activation_layers.append(name)
-        elif "critic" in name:
+        if ("encoder" in name or "critic" in name) and "int" not in name:
             self.critic_activation_layers.append(name)
 
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
@@ -572,9 +599,13 @@ class ActorCriticSeparateWeights(ActorCritic):
 
     def register_hooks(self):
         for name, layer in self.named_modules(remove_duplicate=False):
-            if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU) and 'target' not in name:  # we don't need activations for the target network
-                layer.register_forward_hook(self.save_hook(name))
-                self.update_activation_layers(name)
+            if 'target' not in name:  # we don't need activations for the target network
+                if isinstance(layer, nn.Linear) or isinstance(layer, nn.Conv2d):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_pre_activation_layers(name)
+                if isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
+                    layer.register_forward_hook(self.save_hook(name))
+                    self.update_activation_layers(name)
 
     def save_hook(self, layer_name):
         def hook(module, input, output):
@@ -586,8 +617,16 @@ class ActorCriticSeparateWeights(ActorCritic):
                 self.predictor_activation_layers.append(name)
             elif "actor" in name:
                 self.actor_activation_layers.append(name)
-            elif "critic" in name:
+            elif "critic" in name and "int" not in name:
                 self.critic_activation_layers.append(name)
+
+    def update_pre_activation_layers(self, name):
+            if "predictor_network" in name:
+                self.predictor_pre_activation_layers.append(name)
+            elif "actor" in name:
+                self.actor_pre_activation_layers.append(name)
+            elif "critic" in name and "int" not in name:
+                self.critic_pre_activation_layers.append(name)
 
     def _core_rnn(self, head_output, rnn_states):
         """

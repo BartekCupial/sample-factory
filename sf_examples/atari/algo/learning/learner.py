@@ -401,7 +401,6 @@ class DatasetLearner(Learner):
 
         for (name, new_module), (_, old_module) in zip(new_actor_critic.named_children(), self.actor_critic.named_children()):
             if modules_to_perturb is None or name in modules_to_perturb:
-                print(f"Will perturb in module {name}")
                 for new_param, old_param in zip(new_module.parameters(), old_module.parameters()):
                     old_param.data.mul_(shrink).add_(perturb * new_param.data)
 
@@ -447,7 +446,7 @@ class DatasetLearner(Learner):
                 all_layers_score[layer_name] = neuron_scores
         return all_layers_score
 
-    def _dead_neurons(self, tau):
+    def _dead_neurons(self, tau, post_activation=True):
         dead_neurons = {}
 
         n_dead_actor = 0
@@ -456,42 +455,116 @@ class DatasetLearner(Learner):
         n_dead_critic = 0
         n_total_critic = 0
 
+        n_dead = 0
+        n_total = 0
+        parsed_layers = set()
+
         if self.cfg.with_rnd:
             n_dead_predictor = 0
             n_total_predictor = 0
 
         all_layers_scores = self._calculate_neuron_score_all_layers(self.actor_critic.activations)
-        for layer_name, layer_scores in all_layers_scores.items():
-            num_neurons = layer_scores.shape[0]
-            num_dead_neurons = (layer_scores <= tau).sum().item()
 
-            dead_neurons['n_dead__' + layer_name] = num_dead_neurons
-            dead_neurons['pct_dead__' + layer_name] = num_dead_neurons/num_neurons*100
-
-            if layer_name in self.actor_critic.actor_activation_layers:
-                n_dead_actor += num_dead_neurons
-                n_total_actor += num_neurons
-
-            if layer_name in self.actor_critic.critic_activation_layers:
-                n_dead_critic += num_dead_neurons
-                n_total_critic += num_neurons
-
+        if post_activation:
+            actor_layers = self.actor_critic.actor_activation_layers
+            critic_layers = self.actor_critic.critic_activation_layers 
+            all_layers = actor_layers+critic_layers
             if self.cfg.with_rnd:
-                if layer_name in self.actor_critic.predictor_activation_layers:
-                    n_dead_predictor += num_dead_neurons
-                    n_total_predictor += num_neurons
+                predictor_layers = self.actor_critic.predictor_activation_layers
+                all_layers += predictor_layers
+        else:
+            actor_layers = self.actor_critic.actor_pre_activation_layers
+            critic_layers = self.actor_critic.critic_pre_activation_layers 
+            all_layers = actor_layers+critic_layers
+            if self.cfg.with_rnd:
+                predictor_layers = self.actor_critic.predictor_pre_activation_layers
+                all_layers += predictor_layers
+
+        for layer_name, layer_scores in all_layers_scores.items():
+            if (layer_name in all_layers):
+                num_neurons = layer_scores.shape[0]
+                num_dead_neurons = (layer_scores <= tau).sum().item()
+
+                dead_neurons['n_dead__' + layer_name] = num_dead_neurons
+                dead_neurons['pct_dead__' + layer_name] = num_dead_neurons/num_neurons*100
+
+                if layer_name in actor_layers:
+                    n_dead_actor += num_dead_neurons
+                    n_total_actor += num_neurons
+
+
+                if layer_name in critic_layers:
+                    n_dead_critic += num_dead_neurons
+                    n_total_critic += num_neurons
+
+                if layer_name in actor_layers + critic_layers:
+                    if layer_name not in parsed_layers:
+                        n_dead += num_dead_neurons
+                        n_total += num_neurons
+                        parsed_layers.add(layer_name)
+
+                if self.cfg.with_rnd:
+                    if layer_name in predictor_layers:
+                        n_dead_predictor += num_dead_neurons
+                        n_total_predictor += num_neurons
+        
+        drm_pre = self.drm_dormant_ratio(target_layers=list(set(self.actor_critic.actor_pre_activation_layers+self.actor_critic.critic_pre_activation_layers)))
+        drm = self.drm_dormant_ratio(target_layers=list(set(self.actor_critic.actor_activation_layers+self.actor_critic.critic_activation_layers)))
+        drm_dict = {
+            "drm_pre__dormant_ratio": drm_pre,
+                "drm__dormant_ratio": drm,
+            }
 
         # We don't need to report these if actor and critic share weights
         if self.cfg.cleanrl_actor_critic or not self.cfg.actor_critic_share_weights:
             dead_neurons['dormant_ratio_actor'] = n_dead_actor/n_total_actor*100
             dead_neurons['dormant_ratio_critic'] = n_dead_critic/n_total_critic*100
+            # drm_pre_actor = self.drm_dormant_ratio(target_layers = self.actor_critic.actor_pre_activation_layers)
+            drm_actor = self.drm_dormant_ratio(target_layers = self.actor_critic.actor_activation_layers, percentage=self.cfg.tau)
+            # drm_pre_critic = self.drm_dormant_ratio(target_layers = self.actor_critic.critic_pre_activation_layers)
+            drm_critic = self.drm_dormant_ratio(target_layers = self.actor_critic.critic_activation_layers, percentage=self.cfg.tau)
+
+            drm_dict_ac={
+                # "drm_pre__actor": drm_pre_actor,
+                "drm__actor": drm_actor,
+                # "drm_pre__critic": drm_pre_critic,
+                "drm__critic": drm_critic,
+                # "drm_pre__dormant_ratio": drm_pre,
+                "drm__dormant_ratio": drm,
+            }
+            drm_dict.update(drm_dict_ac)
 
         if self.cfg.with_rnd:
             dead_neurons['dormant_ratio_predictor'] = n_dead_predictor/n_total_predictor*100
-
-        dead_neurons['dormant_ratio'] = (n_dead_actor + n_dead_critic)/(n_total_actor + n_total_critic)*100
+            # drm_pre_predictor = self.drm_dormant_ratio(target_layers = self.actor_critic.predictor_pre_activation_layers, percentage=self.cfg.tau)
+            drm_predictor = self.drm_dormant_ratio(target_layers = self.actor_critic.predictor_activation_layers, percentage=self.cfg.tau)
+            # drm_dict["drm_pre__predictor"] = drm_pre_predictor
+            drm_dict["drm__predictor"] = drm_predictor
+            
+        dead_neurons['dormant_ratio'] = n_dead/n_total*100
+        dead_neurons.update(drm_dict)
         self.curr_dormant_ratio = dead_neurons['dormant_ratio']
         return dead_neurons
+
+    def drm_dormant_ratio(self, target_layers, percentage=0.025):
+        total_neurons = 0
+        dormant_neurons = 0
+
+        for layer_name, output_data in self.actor_critic.activations.items():
+            if layer_name in target_layers:
+                if output_data.dim() > 2:
+                    mean_output = output_data.abs().mean(dim=(0, 2, 3))  # channel-wise mean
+                else:
+                    mean_output = output_data.abs().mean(0)
+                avg_neuron_output = mean_output.mean()
+                dormant_indices = (mean_output < avg_neuron_output *
+                                percentage).nonzero(as_tuple=True)[0]
+                # total_neurons += module.weight.shape[0]
+                # dormant_neurons += len(dormant_indices)  
+                total_neurons += mean_output.numel()
+                dormant_neurons += dormant_indices.numel()
+
+        return dormant_neurons / total_neurons * 100
 
     def _grad_and_param_norms(self):
         per_layer_grad_norms = {
@@ -598,9 +671,9 @@ class DatasetLearner(Learner):
         )
 
 
-        out = {**singular_values, **ranks}
-
-        return out
+        # out = {**singular_values, **ranks}
+        # return out
+        return ranks
 
     def _effective_rank(self, srank_threshold):
         with torch.no_grad():
@@ -834,6 +907,25 @@ class DatasetLearner(Learner):
                 else:
                     unfreeze_selected(self.env_steps, self.cfg, self.actor_critic, self.models_frozen)
 
+        # move S+P here
+        if ((self.cfg.use_shrink_perturb)
+            and (self.env_steps>self.cfg.freeze_shrink_perturb)
+            and (self.env_steps - self.last_perturb_env_step > self.cfg.freq_shrink_perturb)):
+            if self.cfg.with_rnd:
+                log.debug(f"Freezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
+                for param in self.actor_critic.predictor_network.parameters():
+                    param.requires_grad = False
+            log.debug(f"Shrink&Perturb will be applied")
+            self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb, self.cfg.modules_to_perturb)
+            self.last_perturb_env_step = self.env_steps
+            self.last_perturb_train_step = self.train_step
+
+        if self.cfg.with_rnd and self.last_perturb_train_step is not None and self.train_step - self.last_perturb_train_step >= self.cfg.freeze_predictor:
+            log.debug(f"Unfreezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
+            for param in self.actor_critic.predictor_network.parameters():
+                param.requires_grad = True
+            self.last_perturb_train_step = None
+
         for epoch in range(self.cfg.num_epochs):
             with timing.add_time("epoch_init"):
                 if early_stop:
@@ -921,22 +1013,6 @@ class DatasetLearner(Learner):
                 if self.env_steps >= self.cfg.warmup:
                     # update the weights
                     with timing.add_time("update"):
-                        if ((self.cfg.use_shrink_perturb)
-                         and (self.env_steps>self.cfg.freeze_shrink_perturb)
-                          and (self.env_steps - self.last_perturb_env_step > self.cfg.freq_shrink_perturb)):
-                            log.debug(f"Freezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
-                            for param in self.actor_critic.predictor_network.parameters():
-                                param.requires_grad = False
-                            log.debug(f"Shrink&Perturb will be applied")
-                            self.actor_critic = self._shrink_perturb(self.cfg.shrink, self.cfg.perturb, self.cfg.modules_to_perturb)
-                            self.last_perturb_env_step = self.env_steps
-                            self.last_perturb_train_step = self.train_step
-
-                        if self.last_perturb_train_step is not None and self.train_step - self.last_perturb_train_step >= self.cfg.freeze_predictor:
-                            log.debug(f"Unfreezing predictor! Env step is: {self.env_steps}, train_step is: {self.train_step}")
-                            for param in self.actor_critic.predictor_network.parameters():
-                                param.requires_grad = True
-                            self.last_perturb_train_step = None
 
                         if self.train_step % self.cfg.optim_step_every_ith == 0:
                             # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()

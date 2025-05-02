@@ -995,6 +995,7 @@ class Learner(Configurable):
         with torch.no_grad():
             # create a shallow copy so we can modify the dictionary
             # we still reference the same buffers though
+            print(f"Actions: {batch['actions'].shape}")
             buff = shallow_recursive_copy(batch)
 
             # ignore experience from other agents (i.e. on episode boundary) and from inactive agents
