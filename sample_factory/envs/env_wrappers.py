@@ -555,6 +555,8 @@ class MontezumaRoomCountWrapper(gym.Wrapper):
                     info['episode_extra_stats'][f"visitation_frequency_{i}"] = (self.visited_rooms[i]/self.episode_length).item()
                     info['episode_extra_stats'][f"unique_positions_{i}"] = (self.unique_positions[i]).item()
 
+            info['episode_extra_stats'][f"unique_overall"] =  sum((self.unique_positions[i]).item() for i in range(len(self.unique_positions)))
+
             # info['episode_extra_stats']['episode_heatmaps'] = self.heatmaps
             # for room in self.visited_rooms.keys():
             #     # self.save_heatmap(room)
