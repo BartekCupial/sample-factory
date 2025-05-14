@@ -19,6 +19,7 @@ from sample_factory.model.model_utils import model_device
 from sample_factory.utils.normalize import ObservationNormalizer
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log
+# from sample_factory.model.model_utils import orthogonal_init
 
 from gymnasium.wrappers.normalize import RunningMeanStd
 import copy
@@ -729,9 +730,9 @@ def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_spac
 
     model_factory = global_model_factory()
 
-    if cfg.cleanrl_actor_critic:
-        return CleanRLActorCritic(model_factory, obs_space, action_space, cfg)
-    elif cfg.actor_critic_share_weights:
+    # if cfg.cleanrl_actor_critic:
+    #     return CleanRLActorCritic(model_factory, obs_space, action_space, cfg)
+    if cfg.actor_critic_share_weights:
         return ActorCriticSharedWeights(model_factory, obs_space, action_space, cfg)
     else:
         return ActorCriticSeparateWeights(model_factory, obs_space, action_space, cfg)
