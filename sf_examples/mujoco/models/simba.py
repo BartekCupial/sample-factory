@@ -181,7 +181,7 @@ class SimBaEncoderMLP(nn.Module):
         out = x
         out = self.input_projection(out)
         # μ, σ, clip = self.norm.forward(out)
-        out = out.sub(μ).mul(1 / σ).clamp(-clip, clip)
+        # out = out.sub(μ).mul(1 / σ).clamp(-clip, clip)
 
         for block in self.blocks:
             out = block(out)
