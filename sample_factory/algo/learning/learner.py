@@ -887,18 +887,18 @@ class Learner(Configurable):
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss
         
-        stats.dead_neurons = var.dead_neurons
-        stats.effective_rank = var.effective_rank
-        stats.l2_init_loss = var.l2_init_loss
+        # stats.dead_neurons = var.dead_neurons
+        # stats.effective_rank = var.effective_rank
+        # stats.l2_init_loss = var.l2_init_loss
         if self.cfg.with_rnd:
             stats.int_rewards = var.int_rewards.mean()
             stats.curiosity_rewards = var.curiosity_rewards.mean()
             stats.predictor_loss = var.predictor_loss
             stats.int_value_loss = var.int_value_loss
 
-        if self.train_step % 200 == 0:
-            stats.per_layer_grad_norms = var.per_layer_grad_norms
-            stats.per_layer_param_norms = var.per_layer_param_norms
+        # if self.train_step % 200 == 0:
+            # stats.per_layer_grad_norms = var.per_layer_grad_norms
+            # stats.per_layer_param_norms = var.per_layer_param_norms
         
         # # Log dead neurons
         # for layer in var['dead_neurons_dict'].keys():
@@ -995,7 +995,6 @@ class Learner(Configurable):
         with torch.no_grad():
             # create a shallow copy so we can modify the dictionary
             # we still reference the same buffers though
-            print(f"Actions: {batch['actions'].shape}")
             buff = shallow_recursive_copy(batch)
 
             # ignore experience from other agents (i.e. on episode boundary) and from inactive agents
@@ -1165,10 +1164,10 @@ class Learner(Configurable):
                 # likewise, some invalid values of log_prob_actions can cause NaNs or infs
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
-            if self.cfg.with_rnd:
-                log.debug(f"[RND] rewards={buff['rewards'].mean()}, curiosity_rewards={buff['curiosity_rewards'].mean()}, int_rewards={buff['int_rewards'].mean()}")
-            else:
-                log.debug(f"[OLD] rewards={buff['rewards'].mean()}")
+            # if self.cfg.with_rnd:
+            #     log.debug(f"[RND] rewards={buff['rewards'].mean()}, curiosity_rewards={buff['curiosity_rewards'].mean()}, int_rewards={buff['int_rewards'].mean()}")
+            # else:
+            #     log.debug(f"[OLD] rewards={buff['rewards'].mean()}")
             return buff, dataset_size, num_invalids
 
     def train(self, batch: TensorDict) -> Optional[Dict]:
