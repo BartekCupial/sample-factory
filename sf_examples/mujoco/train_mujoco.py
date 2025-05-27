@@ -21,6 +21,8 @@ from sample_factory.model.actor_critic import (
 from sf_examples.mujoco.models import (
     SimBaActorEncoder,
     SimBaCriticEncoder,
+    BROActorEncoder,
+    BROCriticEncoder,
 )
 
 def add_extra_params_general(parser):
@@ -71,11 +73,14 @@ def add_extra_params_general(parser):
 class ActorCriticDifferentEncoders(ActorCriticSeparateWeights):
     def __init__(self, model_factory, obs_space, action_space, cfg):
         super().__init__(model_factory, obs_space, action_space, cfg)
+        if cfg.model == "simba":
+            self.actor_encoder = SimBaActorEncoder(cfg, obs_space)
+            self.critic_encoder = SimBaCriticEncoder(cfg, obs_space)
+        elif cfg.model == "bro":
+            self.actor_encoder = BROActorEncoder(cfg, obs_space)
+            self.critic_encoder = BROCriticEncoder(cfg, obs_space)
 
-        self.actor_encoder = SimBaActorEncoder(cfg, obs_space)
         self.actor_core = model_factory.make_model_core_func(cfg, self.actor_encoder.get_out_size())
-
-        self.critic_encoder = SimBaCriticEncoder(cfg, obs_space)
         self.critic_core = model_factory.make_model_core_func(cfg, self.critic_encoder.get_out_size())
 
         self.encoders = [self.actor_encoder, self.critic_encoder]
@@ -101,7 +106,7 @@ def make_mujoco_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: Act
     model_factory = global_model_factory()
     # obs_space = obs_space_without_action_mask(obs_space)
 
-    if cfg.model == "simba":
+    if cfg.model in ["simba", "bro"]:
         if cfg.actor_critic_share_weights:
             return ActorCriticSharedWeights(model_factory, obs_space, action_space, cfg)
         else:
@@ -184,6 +189,8 @@ def make_mujoco_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
         return MultiInputEncoder(cfg, obs_space)
     elif cfg.model == "simba":
         return SimBaActorEncoder(cfg, obs_space)
+    elif cfg.model == "bro":
+        return BROActorEncoder(cfg, obs_space)
 
 
 def register_mujoco_components():

@@ -1,4 +1,5 @@
 from mrunner.helpers.specification_helper import create_experiments_helper
+import json
 
 name = globals()["script"][:-3]
 
@@ -24,10 +25,10 @@ config = {
 # params different between exps
 params_grid = [
     {
-        "seed": list(range(1)),
+        "seed": list(range(3)),
         "env": ["mujoco_hopper"],
-        "actor_critic_share_weights": [True],
-        "model": ["simba"],
+        "actor_critic_share_weights": [True, False],
+        "model": ["bro"],
     },
 ]
 
@@ -42,3 +43,20 @@ experiments_list = create_experiments_helper(
     params_grid=params_grid,
     mrunner_ignore=".mrunnerignore",
 )
+from mrunner.helpers.client_helper import get_configuration
+
+exps = []
+
+for i, exp in enumerate(experiments_list):
+    curr_config = {"project_name": exp.project, "unique_name": exp.unique_name, "name": exp.name}
+    params = exp.parameters
+    run_script = params.pop("run_script", "sf_examples.mujoco.train_mujoco")
+    key_pairs = [f"--{key}={value}" for key, value in params.items()]
+    cmd = ["python", "-m", run_script] + key_pairs
+    curr_config["command"] = " ".join(cmd)
+    exps.append(curr_config)
+
+
+with open("config.jsonl", "w") as f:
+    for item in exps:
+        f.write(json.dumps(item) + "\n")
