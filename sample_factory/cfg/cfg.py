@@ -283,6 +283,18 @@ def add_rl_args(p: ArgumentParser):
         help="c_hat clipping parameter of the V-trace algorithm. Low values for c_hat can reduce variance of the advantage estimates (similar to GAE lambda < 1)",
     )
 
+    # old other params
+    p.add_argument("--critic_layer_norm", type=str2bool, default=False)
+    p.add_argument("--encoder_conv_scale", type=int, default=1)
+    p.add_argument(
+        "--critic_learning_rate",
+        type=float,
+        default=None,
+        help="this parameter doesn't work with with lr_scheduler, it will be overwritten.",
+    )
+    p.add_argument("--remove_critic", type=str2bool, default=False)
+
+
     # plasticity
     p.add_argument("--tau", type=float, default=0.1, help="Threshold for dead/dormant neurons")  # Default: as in the paper
     p.add_argument("--delta", type=float, default=0.99, help="Threshold for effective rank")  # Default: as in the paper
@@ -294,6 +306,14 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument("--perturb", default=0.1, type=float, help="Perturbation coefficient for Shrink&Perturb")  # Default: as in the paper
     p.add_argument("--modules_to_perturb", default=None, type=ast.literal_eval, help="List of modules that Shrink&Perturb will be applied to, default: all of them (the entire actor-critic)")  # Default: as in the paper
     p.add_argument("--freeze_predictor", default=0, type=int, help="Number of train steps when predictor is frozen after S+P")
+
+    # RND
+    p.add_argument("--with_rnd", default=False, type=str2bool, help="Enables Random Network Distillation")
+    p.add_argument("--int_gamma", default=0.99, type=float, help="Gamma used for intrinsic rewards in RND")
+    p.add_argument("--int_coeff", default=1, type=float, help="coefficient/weight of intrinsic advatages in RND")
+    p.add_argument("--ext_coeff", default=2, type=float, help="coefficient/weight of extrinsic advatages in RND")
+    p.add_argument("--keep_prob", default=0.25, type=float, help="proportion of experience used for training predictor network in RND")
+    p.add_argument("--cleanrl_actor_critic", default=False, type=str2bool, help="Use the same ActorCritic architecture as in CleanRL's RND")
 
     # optimization
     p.add_argument(

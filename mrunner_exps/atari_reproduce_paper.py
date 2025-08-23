@@ -5,7 +5,7 @@ name = globals()["script"][:-3]
 # params for all exps
 config = {
     "exp_tags": [name],
-    "train_for_env_steps": 200_000_000,
+    "train_for_env_steps": 1_000_000,
     "num_workers": 4,
     "num_envs_per_worker": 8,
     "num_batches_per_epoch": 16,
@@ -17,11 +17,11 @@ config = {
     "wandb_project": "atari",
     "wandb_group": "plasticity, reproduce paper -- 3",
     "wandb_tags": [name],
-    "with_wandb": True,
+    "with_wandb": False,
 }
 
 # params different between exps
-atari_games = ["breakout", "montezuma", "phoenix", "namethisgame"]
+atari_games = ["breakout"]
 
 params_grid = []
 
@@ -56,7 +56,7 @@ for atari_game in atari_games:
             "optimizer": ["adam"],
             "num_epochs": [8],
             "normalize_returns": [True],
-            "repeat_action_probability": [0.0, 0.25],
+            "repeat_action_probability": [0.0],
 
             # paper's params: plasticity
             "delta": [0.99],

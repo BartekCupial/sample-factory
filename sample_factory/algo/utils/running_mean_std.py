@@ -149,3 +149,86 @@ def running_mean_std_summaries(running_mean_std_module: Union[nn.Module, ScriptM
             res[name.replace("_var", "_std")] = torch.sqrt(buf.float() + _NORM_EPS).mean()
 
     return res
+
+
+class RunningMeanStd(nn.Module):
+    def __init__(self, input_shape, epsilon=_NORM_EPS, clip=_DEFAULT_CLIP, per_channel=False, norm_only=False):
+        super().__init__()
+        log.debug("RunningMeanStd input shape: %r", input_shape)
+        self.input_shape: Final = input_shape
+        self.eps: Final[float] = epsilon
+        self.clip: Final[float] = clip
+
+        self.norm_only: Final[bool] = norm_only
+        self.per_channel: Final[bool] = per_channel
+
+        if per_channel:
+            if len(self.input_shape) == 3:
+                self.axis = [0, 2, 3]
+            if len(self.input_shape) == 2:
+                self.axis = [0, 2]
+            if len(self.input_shape) == 1:
+                self.axis = [0]
+            shape = self.input_shape[0]
+        else:
+            self.axis = [0]
+            shape = input_shape
+
+        self.register_buffer("running_mean", torch.zeros(shape, dtype=torch.float64))
+        self.register_buffer("running_var", torch.ones(shape, dtype=torch.float64))
+        self.register_buffer("count", torch.ones([1], dtype=torch.float64))
+
+    @staticmethod
+    @torch.jit.script
+    def _update_mean_var_count_from_moments(
+        mean: Tensor, var: Tensor, count: Tensor, batch_mean: Tensor, batch_var: Tensor, batch_count: int
+    ):
+        delta = batch_mean - mean
+        tot_count = count + batch_count
+
+        new_mean = mean + delta * batch_count / tot_count
+        m_a = var * count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + (delta**2) * count * batch_count / tot_count
+        new_var = M2 / tot_count
+        return new_mean, new_var, tot_count
+
+    def forward(self, x: Tensor, denormalize: bool = False) -> None:
+        """This function modifies the input tensor and returns the normalized tensor."""
+        x_copy = x.clone()
+        if self.training and not denormalize:
+            # check if the shape exactly matches or it's a scalar for which we use shape (1, )
+            assert x_copy.shape[1:] == self.input_shape or (
+                x_copy.shape[1:] == () and self.input_shape == (1,)
+            ), f"RMS expected input shape {self.input_shape}, got {x_copy.shape[1:]}"
+
+            batch_count = x_copy.size()[0]
+            μ = x_copy.mean(self.axis)  # along channel axis
+            σ2 = x_copy.var(self.axis)
+            self.running_mean[:], self.running_var[:], self.count[:] = self._update_mean_var_count_from_moments(
+                self.running_mean, self.running_var, self.count, μ, σ2, batch_count
+            )
+
+        # change shape
+        if self.per_channel:
+            if len(self.input_shape) == 3:
+                current_mean = self.running_mean.view([1, self.input_shape[0], 1, 1]).expand_as(x)
+                current_var = self.running_var.view([1, self.input_shape[0], 1, 1]).expand_as(x)
+            elif len(self.input_shape) == 2:
+                current_mean = self.running_mean.view([1, self.input_shape[0], 1]).expand_as(x)
+                current_var = self.running_var.view([1, self.input_shape[0], 1]).expand_as(x)
+            elif len(self.input_shape) == 1:
+                current_mean = self.running_mean.view([1, self.input_shape[0]]).expand_as(x)
+                current_var = self.running_var.view([1, self.input_shape[0]]).expand_as(x)
+            else:
+                raise RuntimeError(f"RunningMeanStd input shape {self.input_shape} not supported")
+        else:
+            current_mean = self.running_mean
+            current_var = self.running_var
+
+        μ = current_mean.float()
+        σ2 = current_var.float()
+        σ = torch.sqrt(σ2 + self.eps)
+        clip = self.clip
+
+        return μ, σ, clip

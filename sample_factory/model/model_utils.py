@@ -8,6 +8,14 @@ from sample_factory.cfg.configurable import Configurable
 from sample_factory.utils.typing import Config
 
 
+def orthogonal_init(module, gain=1.0):
+    if isinstance(module, (nn.Linear, nn.Conv2d)):
+        nn.init.orthogonal_(module.weight, gain=gain)
+        if module.bias is not None:
+            module.bias.data.fill_(0.00)
+    return module
+
+
 def get_rnn_size(cfg):
     if cfg.use_rnn:
         size = cfg.rnn_size * cfg.rnn_num_layers

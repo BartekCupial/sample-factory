@@ -44,7 +44,7 @@ class MontezumaExtraSummariesObserver(AlgoObserver):
 
 def register_msg_handlers(cfg: Config, runner: Runner):
     if cfg.env == "atari_montezuma":
-        log.debug(f"Using motezuma handler")
+        log.debug(f"Using montezuma handler")
         # extra functions to calculate room-level heatmaps etc.
         runner.register_episodic_stats_handler(montezuma_extra_episodic_stats_processing)
         runner.register_observer(MontezumaExtraSummariesObserver())
