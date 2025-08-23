@@ -21,7 +21,7 @@ class MlpDecoder(Decoder):
         activation = nonlinearity(cfg)
         self.mlp = create_mlp(decoder_layers, decoder_input_size, activation)
         self.activations = {}
-        self.last_linear_layer = None
+        self.last_layer = None
         self.register_hooks()
         # if len(decoder_layers) > 0:
         #     self.mlp = torch.jit.script(self.mlp)
@@ -29,15 +29,14 @@ class MlpDecoder(Decoder):
         self.decoder_out_size = calc_num_elements(self.mlp, (decoder_input_size,))
 
     def register_hooks(self):
-        for name, layer in self.named_modules():
-            # if isinstance(layer, (nn.Conv2d, nn.Linear)):
-            if isinstance(layer, (nn.Linear)):
-                self.last_linear_layer = name
+        for name, layer in self.named_modules(remove_duplicate=False):
+            if isinstance(layer, (nn.ReLU)) or isinstance(layer, (nn.LeakyReLU)):
+                self.last_layer = name
                 layer.register_forward_hook(self.save_activations_hook(name))
 
     def save_activations_hook(self, layer_name):
         def hook(module, input, output):
-            self.activations["decoder_" + layer_name] = output
+            self.activations[layer_name] = output.detach().clone()
         return hook
 
     def forward(self, core_output):

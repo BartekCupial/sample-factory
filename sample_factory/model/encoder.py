@@ -5,7 +5,7 @@ from gymnasium import spaces
 from torch import Tensor, nn
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
-from sample_factory.model.model_utils import ModelModule, create_mlp, model_device, nonlinearity
+from sample_factory.model.model_utils import ModelModule, copy_activation_module, create_mlp, model_device, nonlinearity
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
@@ -52,25 +52,6 @@ class MultiInputEncoder(Encoder):
             out_size += self.encoders[obs_key].get_out_size()
 
         self.encoder_out_size = out_size
-        self.activations = {}
-        self.last_linear_layer = None
-        self.register_hooks()
-
-    def register_hooks(self):
-        for name, layer in self.named_modules():
-            if isinstance(layer, nn.Linear):
-                self.last_linear_layer = name
-                layer.register_forward_hook(self.save_activations_hook(name, True))
-            elif isinstance(layer, nn.Conv2d):
-                layer.register_forward_hook(self.save_activations_hook(name, False))
-
-    def save_activations_hook(self, layer_name, is_linear):
-        def hook(module, input, output):
-            if is_linear:
-                self.activations["encoder_mlp_" + layer_name] = output
-            else:
-                self.activations["encoder_conv_" + layer_name] = output
-        return hook
 
     def forward(self, obs_dict):
         if len(self.obs_keys) == 1:
@@ -123,7 +104,7 @@ class ConvEncoderImpl(nn.Module):
             elif isinstance(layer, (list, tuple)):
                 inp_ch, out_ch, filter_size, stride = layer
                 conv_layers.append(nn.Conv2d(inp_ch, out_ch, filter_size, stride=stride))
-                conv_layers.append(activation)
+                conv_layers.append(copy_activation_module(activation))
             else:
                 raise NotImplementedError(f"Layer {layer} not supported!")
 

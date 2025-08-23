@@ -4,19 +4,27 @@ import sys
 from os.path import join
 from typing import Callable
 
+from sample_factory.algo.runners.runner import AlgoObserver, Runner
+from sample_factory.utils.typing import Config, Env, PolicyID
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.utils.context import global_model_factory, sf_global_context
 from sample_factory.cfg.arguments import load_from_path, parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
 from sample_factory.model.encoder import Encoder
-from sample_factory.train import run_rl
+from sample_factory.train import run_rl, make_runner
+from sample_factory.algo.utils.misc import ExperimentStatus
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log, str2bool
 from sf_examples.atari.algo.learning.learner import DatasetLearner
 from sf_examples.atari.atari_params import atari_override_defaults
 from sf_examples.atari.atari_utils import ATARI_ENVS, make_atari_env
 from sf_examples.atari.models.kickstarter import KickStarter
+from sf_examples.atari.montezuma_summaries import (
+    montezuma_extra_episodic_stats_processing,
+    montezuma_extra_summaries,
+)
+from tensorboardX import SummaryWriter
 
 
 def register_atari_envs():
@@ -29,6 +37,17 @@ def register_atari_components():
     register_atari_envs()
     global_model_factory().register_actor_critic_factory(make_atari_actor_critic)
 
+class MontezumaExtraSummariesObserver(AlgoObserver):
+    def extra_summaries(self, runner: Runner, policy_id: PolicyID, writer: SummaryWriter, env_steps: int) -> None:
+        montezuma_extra_summaries(runner, policy_id, env_steps, writer)
+
+
+def register_msg_handlers(cfg: Config, runner: Runner):
+    if cfg.env == "atari_montezuma":
+        log.debug(f"Using motezuma handler")
+        # extra functions to calculate room-level heatmaps etc.
+        runner.register_episodic_stats_handler(montezuma_extra_episodic_stats_processing)
+        runner.register_observer(MontezumaExtraSummariesObserver())
 
 def parse_atari_args(argv=None, evaluation=False):
     parser, partial_cfg = parse_sf_args(argv=argv, evaluation=evaluation)
@@ -226,16 +245,34 @@ def add_extra_params_general(parser):
         help="this parameter doesn't work with with lr_scheduler, it will be overwritten.",
     )
     p.add_argument("--remove_critic", type=str2bool, default=False)
-    p.add_argument("--tau", type=float, default=0.1)
-    p.add_argument("--delta", type=float, default=0.01)  # threshold for effective rank
     p.add_argument("--repeat_action_probability", type=float, default=0.0) # for sticky actions
 
+    # RND
+    p.add_argument("--with_rnd", default=False, type=str2bool, help="Enables Random Network Distillation")
+    p.add_argument("--int_gamma", default=0.99, type=float, help="Gamma used for intrinsic rewards in RND")
+    p.add_argument("--int_coeff", default=1, type=float, help="coefficient/weight of intrinsic advatages in RND")
+    p.add_argument("--ext_coeff", default=2, type=float, help="coefficient/weight of extrinsic advatages in RND")
+    p.add_argument("--keep_prob", default=0.25, type=float, help="proportion of experience used for training predictor network in RND")
+    p.add_argument("--cleanrl_actor_critic", default=False, type=str2bool, help="Use the same ActorCritic architecture as in CleanRL's RND")
+    
+    # Montezuma 
+    p.add_argument("--count_montezuma_rooms", default=False, type=bool, help="Whether the number of rooms visited during Montezuma training should be tracked and logged")
+    p.add_argument("--save_heatmaps_locally", default=False, type=bool, help="Whether the heatmap should be saved loccaly, as .png files on disc")
+    p.add_argument("--log_heatmaps_to_wandb", default=False, type=bool, help="Whether the heatmaps should be looged to wandb")
+    p.add_argument("--heatmap_save_freq", default=5_000_000, type=int, help="Frequency of saving/logging heatmaps, in env_steps")
 
 def main():  # pragma: no cover
     """Script entry point."""
     register_atari_components()
     cfg = parse_atari_args()
-    status = run_rl(cfg)
+    # status = run_rl(cfg)
+
+    cfg, runner = make_runner(cfg)
+    register_msg_handlers(cfg, runner)
+
+    status = runner.init()
+    if status == ExperimentStatus.SUCCESS:
+        status = runner.run()
     return status
 
 
